@@ -32,8 +32,9 @@ export default function ActivityItem({
         ? url
         : `${window.location.origin}${url}`;
       window.open(finalUrl, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      console.error("Erro abrindo arquivo:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro abrindo arquivo:", msg);
       alert("Não foi possível abrir o arquivo.");
     }
   }

@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 
 type Alternative = {
   id: string;
@@ -27,7 +27,14 @@ type InstancePayload = {
   instance: Instance;
 };
 
+type RespostaContagem = {
+  alternativa: string;
+  contador: number;
+};
+
 type Props = {
+  // tornar `respostas` opcional para corresponder a importações dinâmicas/usos
+  respostas?: RespostaContagem[];
   fetchEndpoint?: string;
   saveEndpoint?: string;
   autoSave?: boolean; // default false: student must click "Enviar atividade"
@@ -45,6 +52,7 @@ export default function PluggedContagemMCQ({
   alunoId = null,
   atividadeId = null,
   turmaId = null,
+  respostas = [],
 }: Props) {
   const [payload, setPayload] = useState<InstancePayload | null>(null);
   const [loading, setLoading] = useState<boolean>(!!initialLoad);
@@ -80,12 +88,15 @@ export default function PluggedContagemMCQ({
         const text = await r.text().catch(() => "");
         throw new Error(`HTTP ${r.status} ${text}`);
       }
-      const body = await r.json();
-      // body must be { meta, instance }
+      const body = (await r.json().catch(() => null)) as unknown;
+      if (!body || typeof body !== "object") {
+        throw new Error("Resposta inválida do servidor");
+      }
       setPayload(body as InstancePayload);
-    } catch (err: any) {
-      console.error("fetchInstance error:", err);
-      setError(err?.message || "Não foi possível carregar a instância.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("fetchInstance error:", msg);
+      setError(msg || "Não foi possível carregar a instância.");
     } finally {
       setLoading(false);
     }
@@ -102,7 +113,7 @@ export default function PluggedContagemMCQ({
         (a) => a.id === selectedId
       );
       const payloadToSend = {
-        // use derivedAtividadeId como fallback quando a prop não for fornecida
+        // use derivedAtividadeId as fallback quando a prop não for fornecida
         idAtividade: atividadeId ?? derivedAtividadeId ?? null,
         idAluno: alunoId ?? null,
         idTurma: turmaId ?? null,
@@ -123,24 +134,43 @@ export default function PluggedContagemMCQ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadToSend),
       });
-      const j = await r.json().catch(() => null);
+      const j = (await r.json().catch(() => null)) as unknown;
       if (!r.ok) {
-        console.error("save response error body:", j);
-        throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
+        const errMsg =
+          j && typeof j === "object"
+            ? String(
+                (j as Record<string, unknown>).error ??
+                  (j as Record<string, unknown>).message ??
+                  `HTTP ${r.status}`
+              )
+            : `HTTP ${r.status}`;
+        console.error("save response error body:", errMsg);
+        throw new Error(errMsg);
       }
 
       // show result briefly then generate a new instance automatically
       setAnswered(true);
-      setScore(j?.correta ? 1 : 0);
-      setLastCorrectValue(j?.correctValue ?? payload.instance.decimal ?? null);
+      setScore(
+        j && typeof j === "object" && (j as Record<string, unknown>).correta
+          ? 1
+          : 0
+      );
+      setLastCorrectValue(
+        j &&
+          typeof j === "object" &&
+          "correctValue" in (j as Record<string, unknown>)
+          ? ((j as Record<string, unknown>).correctValue as number)
+          : payload.instance.decimal ?? null
+      );
 
       // allow student to see result for a short moment, then load a fresh instance
       setTimeout(async () => {
         await fetchInstance();
       }, 1200);
-    } catch (err: any) {
-      console.error("submit attempt error:", err);
-      alert(err?.message || "Erro ao enviar tentativa.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("submit attempt error:", msg);
+      alert(msg || "Erro ao enviar tentativa.");
     } finally {
       setSaving(false);
     }
@@ -163,17 +193,34 @@ export default function PluggedContagemMCQ({
       setLoadingAtividades(true);
       void fetch("/api/atividades")
         .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-        .then((j) => {
+        .then((j: unknown) => {
           // adapte ao shape real do seu endpoint; aqui assumimos array { idAtividade, titulo }
-          setAvailableAtividades(Array.isArray(j) ? j : j?.atividades ?? []);
+          if (Array.isArray(j)) {
+            setAvailableAtividades(
+              j as { idAtividade: number; titulo: string }[]
+            );
+          } else if (
+            j &&
+            typeof j === "object" &&
+            Array.isArray((j as Record<string, unknown>).atividades)
+          ) {
+            setAvailableAtividades(
+              (j as Record<string, unknown>).atividades as {
+                idAtividade: number;
+                titulo: string;
+              }[]
+            );
+          } else {
+            setAvailableAtividades([]);
+          }
         })
-        .catch((e) => {
-          console.warn("failed to load atividades list:", e);
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn("failed to load atividades list:", msg);
           setAvailableAtividades([]);
         })
         .finally(() => setLoadingAtividades(false));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [atividadeId, derivedAtividadeId]);
 
   // helper para quando usuário escolhe uma atividade manualmente
@@ -182,6 +229,11 @@ export default function PluggedContagemMCQ({
     // opcional: recarregar instância agora que temos atividadeId
     void fetchInstance();
   }
+
+  const total = useMemo(
+    () => respostas.reduce((s, r) => s + (r.contador ?? 0), 0),
+    [respostas]
+  );
 
   if (loading)
     return <div style={{ color: "#fff" }}>Carregando atividade...</div>;
@@ -232,12 +284,31 @@ export default function PluggedContagemMCQ({
                   setLoadingAtividades(true);
                   void fetch("/api/atividades")
                     .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-                    .then((j) =>
-                      setAvailableAtividades(
-                        Array.isArray(j) ? j : j?.atividades ?? []
-                      )
-                    )
-                    .catch(() => setAvailableAtividades([]))
+                    .then((j: unknown) => {
+                      if (Array.isArray(j)) {
+                        setAvailableAtividades(
+                          j as { idAtividade: number; titulo: string }[]
+                        );
+                      } else if (
+                        j &&
+                        typeof j === "object" &&
+                        Array.isArray((j as Record<string, unknown>).atividades)
+                      ) {
+                        setAvailableAtividades(
+                          (j as Record<string, unknown>).atividades as {
+                            idAtividade: number;
+                            titulo: string;
+                          }[]
+                        );
+                      } else {
+                        setAvailableAtividades([]);
+                      }
+                    })
+                    .catch((e: unknown) => {
+                      const msg = e instanceof Error ? e.message : String(e);
+                      console.warn("failed to load atividades list:", msg);
+                      setAvailableAtividades([]);
+                    })
                     .finally(() => setLoadingAtividades(false));
                 }}
                 className="btn"
@@ -458,6 +529,18 @@ export default function PluggedContagemMCQ({
         )}
 
         {saving && <div style={{ color: "#cfc6e6" }}>Enviando...</div>}
+      </div>
+
+      <div>
+        <h3>Contagem MCQ</h3>
+        <ul>
+          {respostas.map((r) => (
+            <li key={r.alternativa}>
+              {r.alternativa} — {r.contador} (
+              {total ? ((r.contador / total) * 100).toFixed(1) : "0"}%)
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

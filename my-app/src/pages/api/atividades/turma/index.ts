@@ -62,11 +62,12 @@ export default async function handler(
     }));
 
     return res.status(200).json(result);
-  } catch (err: any) {
-    console.error("GET /api/atividades/turma error:", err);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("GET /api/atividades/turma error:", msg);
     return res.status(500).json({
       error: "Internal server error",
-      detail: String(err?.message ?? err),
+      detail: msg,
     });
   }
 }

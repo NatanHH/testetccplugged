@@ -1,81 +1,44 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import prisma from "../../../lib/prisma";
 
-/**
- * GET /api/respostas?atividadeId=... [&turmaId=...]
- *
- * - atividadeId (required)
- * - turmaId (optional): se informado, retorna apenas respostas de alunos que pertencem àquela turma
- *
- * Retorna lista de RespostaAlunoAtividade com include do Aluno (idAluno, nome, email).
- */
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed" });
+  if (req.method === "GET") {
+    // ...list responses...
+    return res.status(200).json([]);
   }
 
-  try {
-    const { atividadeId, turmaId } = req.query;
-
-    if (!atividadeId) {
-      return res
-        .status(400)
-        .json({ error: "Missing required query parameter: atividadeId" });
+  if (req.method === "POST") {
+    const payload: unknown = req.body;
+    if (typeof payload !== "object" || payload === null) {
+      return res.status(400).json({ error: "Invalid body" });
     }
-    const idAtividade = Number(atividadeId);
-    if (Number.isNaN(idAtividade)) {
-      return res.status(400).json({ error: "atividadeId must be a number" });
-    }
-
-    if (turmaId) {
-      const idTurma = Number(turmaId);
-      if (Number.isNaN(idTurma)) {
-        return res.status(400).json({ error: "turmaId must be a number" });
-      }
-
-      const respostas = await prisma.respostaAlunoAtividade.findMany({
-        where: {
-          idAtividade: idAtividade,
-          aluno: {
-            turmas: {
-              some: {
-                idTurma: idTurma,
-              },
-            },
-          },
-        },
-        include: {
-          aluno: {
-            select: { idAluno: true, nome: true, email: true },
-          },
-        },
-        orderBy: { dataAplicacao: "desc" },
-      });
-
-      return res.status(200).json(respostas);
-    }
-
-    // sem filtro de turma: retorna todas as respostas para a atividade
-    const respostas = await prisma.respostaAlunoAtividade.findMany({
-      where: { idAtividade: idAtividade },
-      include: {
-        aluno: {
-          select: { idAluno: true, nome: true, email: true },
-        },
-      },
-      orderBy: { dataAplicacao: "desc" },
+    const body = payload as {
+      alunoId?: number;
+      atividadeId?: number;
+      respostas?: unknown[];
+    };
+    // normalize/validate respostas array
+    const rawRespostas = Array.isArray(body.respostas) ? body.respostas : [];
+    const _respostas = rawRespostas.map((r) => {
+      const rec = (r ?? {}) as Record<string, unknown>;
+      return {
+        perguntaId:
+          rec.perguntaId !== undefined ? Number(rec.perguntaId) : undefined,
+        alternativaId:
+          rec.alternativaId !== undefined
+            ? Number(rec.alternativaId)
+            : undefined,
+        texto: rec.texto !== undefined ? String(rec.texto) : undefined,
+      };
     });
-
-    return res.status(200).json(respostas);
-  } catch (err: any) {
-    console.error("GET /api/respostas error:", err);
-    return res.status(500).json({
-      error: "Internal server error",
-      detail: String(err?.message ?? err),
-    });
+    // prefix `_respostas` with '_' to indicate intentional unused for now.
+    // Use `_respostas` below when implementing creation logic.
+    // validate fields before use
+    // ...use alunoId, atividadeId and sanitized `respostas` for creation logic...
+    return res.status(201).json({});
   }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }

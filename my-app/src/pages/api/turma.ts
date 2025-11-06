@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../lib/prisma";
+import type { Aluno } from "@prisma/client";
 
 export default async function handler(
   req: NextApiRequest,
@@ -40,8 +41,9 @@ export default async function handler(
       });
 
       return res.status(200).json(turmas);
-    } catch (error: any) {
-      console.error("Erro ao buscar turmas:", error);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao buscar turmas:", msg);
       return res.status(500).json({ error: "Erro interno do servidor" });
     }
   }
@@ -78,18 +80,23 @@ export default async function handler(
         }
 
         // 3) para cada aluno: upsert (por email) e criar relação turmaAluno se ainda não existir
-        const alunosCriados: any[] = [];
+        const alunosCriados: Aluno[] = [];
         for (const a of alunos) {
-          if (!a || !a.email) continue;
+          const rec = a as Record<string, unknown>;
+          const emailAluno =
+            typeof rec.email === "string" ? rec.email : undefined;
+          if (!emailAluno) continue;
 
           // assume que Aluno.email é único no schema
           const aluno = await tx.aluno.upsert({
-            where: { email: a.email },
-            update: { nome: a.nome ?? a.email },
+            where: { email: emailAluno },
+            update: {
+              nome: typeof rec.nome === "string" ? rec.nome : emailAluno,
+            },
             create: {
-              nome: a.nome ?? a.email,
-              email: a.email,
-              senha: a.senha ?? "", // ajuste conforme seu modelo (ou remova senha se não fornecer)
+              nome: typeof rec.nome === "string" ? rec.nome : emailAluno,
+              email: emailAluno,
+              senha: typeof rec.senha === "string" ? rec.senha : "", // ajuste conforme seu modelo
             },
           });
 
@@ -121,11 +128,10 @@ export default async function handler(
         turma: result.turma,
         alunos: result.alunos,
       });
-    } catch (e: any) {
-      console.error("Erro ao criar turma:", e);
-      return res
-        .status(500)
-        .json({ error: "Erro interno", details: e.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao criar turma:", msg);
+      return res.status(500).json({ error: "Erro interno", details: msg });
     }
   }
 
@@ -154,7 +160,10 @@ export default async function handler(
       // Remover relacionamentos primeiro
       // 1. Capturar ids dos alunos vinculados antes de remover as relações
       const alunoIds =
-        turmaExistente.alunos?.map((ta: any) => ta.idAluno) || [];
+        turmaExistente.alunos?.map((ta) => {
+          const rec = ta as Record<string, unknown>;
+          return Number(rec.idAluno);
+        }) || [];
 
       // 2. Remover alunos da turma (tabela de junção)
       await prisma.turmaAluno.deleteMany({
@@ -197,11 +206,12 @@ export default async function handler(
         message: "Turma excluída com sucesso",
         turmaExcluida: turmaExistente.nome,
       });
-    } catch (error: any) {
-      console.error("Erro ao excluir turma:", error);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao excluir turma:", msg);
       return res.status(500).json({
         error: "Erro interno ao excluir turma",
-        details: error.message,
+        details: msg,
       });
     }
   }

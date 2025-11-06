@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "dev": "next dev",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "build:legacy": "cross-env NEXT_DISABLE_TURBOPACK=1 next build"
   },
   "dependencies": {
     "@prisma/client": "^6.18.0",
@@ -31,9 +32,15 @@
     "@types/node": "^20",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@typescript-eslint/eslint-plugin": "^8.46.3",
+    "@typescript-eslint/parser": "^8.46.3",
     "assemblyscript": "^0.28.9",
-    "eslint": "^9",
-    "eslint-config-next": "15.5.4",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "^15.5.6",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "prisma": "^6.18.0",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

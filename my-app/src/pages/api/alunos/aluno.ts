@@ -1,76 +1,87 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../../lib/prisma";
 
-// Função utilitária para validar dados
-function validateAluno(data: any) {
-  if (!data.nome || !data.email || !data.senha) {
-    return false;
-  }
-  return true;
-}
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
   if (req.method === "GET") {
-    // Listar todos os alunos
+    // exemplo: listar alunos
     const alunos = await prisma.aluno.findMany();
     return res.status(200).json(alunos);
   }
 
   if (req.method === "POST") {
-    // Criar novo aluno
-    if (!validateAluno(req.body)) {
-      return res.status(400).json({ error: "Dados obrigatórios ausentes." });
+    // trate o body como `unknown` e faça validações de tipo antes de usar
+    const payload: unknown = req.body;
+    if (typeof payload !== "object" || payload === null) {
+      return res.status(400).json({ error: "Payload inválido" });
     }
+
+    const { nome, email, senha } = payload as {
+      nome?: unknown;
+      email?: unknown;
+      senha?: unknown;
+    };
+
+    if (typeof nome !== "string" || typeof email !== "string") {
+      return res
+        .status(400)
+        .json({ error: "Campos obrigatórios ausentes: nome e email" });
+    }
+
+    // agora é seguro assumir tipos corretos
+    const nomeStr = nome as string;
+    const emailStr = email as string;
+    const senhaStr = typeof senha === "string" ? senha : "";
+
     try {
-      const novoAluno = await prisma.aluno.create({
+      // sanitize inputs: convert empty strings to undefined so Prisma won't set empty values
+      const nomeVal =
+        typeof nomeStr === "string" && nomeStr.trim().length > 0
+          ? nomeStr.trim()
+          : undefined;
+      const emailVal =
+        typeof emailStr === "string" && emailStr.trim().length > 0
+          ? emailStr.trim()
+          : undefined;
+      const senhaVal =
+        typeof senhaStr === "string" && senhaStr.trim().length > 0
+          ? senhaStr
+          : undefined;
+
+      // required by your Prisma schema: nome, email e senha são obrigatórios
+      if (!nomeVal || !emailVal || !senhaVal) {
+        return res
+          .status(400)
+          .json({ error: "nome, email e senha são obrigatórios" });
+      }
+
+      const created = await prisma.aluno.create({
         data: {
-          nome: req.body.nome,
-          email: req.body.email,
-          senha: req.body.senha,
+          nome: nomeVal,
+          email: emailVal,
+          senha: senhaVal,
         },
       });
-      return res.status(201).json(novoAluno);
-    } catch (e: any) {
-      return res.status(400).json({ error: e.message });
+      return res.status(201).json(created);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+
+      // trata duplicata de email (Prisma P2002) com status 409
+      // acessa o campo `code` de forma segura sem usar `any`
+      const code =
+        typeof err === "object" && err !== null
+          ? (err as Record<string, unknown>)["code"]
+          : undefined;
+      if (code === "P2002") {
+        return res.status(409).json({ error: "Email já cadastrado" });
+      }
+
+      console.error("Erro criando aluno:", msg);
+      return res.status(500).json({ error: "Erro ao criar aluno." });
     }
   }
 
-  if (req.method === "PUT") {
-    // Atualizar dados do aluno
-    const { idAluno, nome, email, senha } = req.body;
-    if (!idAluno) {
-      return res.status(400).json({ error: "idAluno obrigatório." });
-    }
-    try {
-      const alunoAtualizado = await prisma.aluno.update({
-        where: { idAluno: Number(idAluno) },
-        data: { nome, email, senha },
-      });
-      return res.status(200).json(alunoAtualizado);
-    } catch (e: any) {
-      return res.status(400).json({ error: e.message });
-    }
-  }
-
-  if (req.method === "DELETE") {
-    // Apagar aluno pelo idAluno
-    const { idAluno } = req.body;
-    if (!idAluno) {
-      return res.status(400).json({ error: "idAluno obrigatório." });
-    }
-    try {
-      await prisma.aluno.delete({
-        where: { idAluno: Number(idAluno) },
-      });
-      return res.status(204).end();
-    } catch (e: any) {
-      return res.status(400).json({ error: e.message });
-    }
-  }
-
-  // Método não permitido
-  return res.status(405).json({ error: "Método não permitido" });
+  return res.status(405).json({ error: "Method not allowed" });
 }

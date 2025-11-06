@@ -16,8 +16,10 @@ export default async function handler(
         orderBy: { idAtividade: "desc" },
       });
       return res.status(200).json(atividades);
-    } catch (e: any) {
-      return res.status(400).json({ error: e.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("GET /api/professores/atividadesprofessor error:", msg);
+      return res.status(400).json({ error: msg });
     }
   }
   return res.status(405).json({ error: "Método não permitido" });

@@ -1,25 +1,31 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React from "react";
 
-export default function ClientOnlyText({
-  getText,
-  fallback = "",
-  className,
-}: {
-  getText: () => string | null | undefined;
-  fallback?: string;
-  className?: string;
-}) {
-  const [text, setText] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const t = getText();
-      setText(t ?? null);
-    } catch {
-      setText(null);
+type Props =
+  | {
+      getText: () => string | null | undefined;
+      fallback?: string;
+      children?: never;
     }
-  }, [getText]);
+  | { children: React.ReactNode; getText?: never; fallback?: never };
 
-  return <span className={className}>{text ?? fallback}</span>;
+/**
+ * Cliente-only helper:
+ * - Quando usado com `getText`, executa a função diretamente (com try/catch).
+ * - Quando usado com `children`, apenas renderiza os filhos.
+ *
+ * Removemos o useEffect/useState para evitar o aviso "Calling setState synchronously within an effect".
+ */
+export default function ClientOnlyText(props: Props) {
+  if ("getText" in props) {
+    const { getText, fallback = "—" } = props;
+    try {
+      const val = getText?.() ?? fallback;
+      return <>{val}</>;
+    } catch {
+      return <>{fallback}</>;
+    }
+  }
+
+  return <>{props.children}</>;
 }

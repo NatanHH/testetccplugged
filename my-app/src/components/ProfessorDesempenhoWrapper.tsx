@@ -39,6 +39,7 @@ export default function ProfessorDesempenhoWrapper({
           }}
         >
           <DesempenhoAlunos
+            dados={[]}
             turmaId={turmaId ?? null}
             atividadeId={atividadeId ?? null}
           />

@@ -62,7 +62,7 @@ export default async function handler(
     const notaObtida = correta ? 10 : 0;
 
     // grava apenas dados essenciais
-    const saved = await (prisma as any).realizacaoPlugged.create({
+    const saved = await prisma.realizacaoPlugged.create({
       data: {
         idAtividade,
         idAluno,
@@ -77,9 +77,10 @@ export default async function handler(
     return res
       .status(200)
       .json({ ok: true, id: saved.id, correta, correctValue, notaObtida });
-  } catch (err: any) {
-    console.error("respostas/plugged error:", err);
-    return res.status(500).json({ error: err?.message ?? "Erro interno" });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("respostas/plugged error:", msg);
+    return res.status(500).json({ error: msg || "Erro interno" });
   } finally {
     await prisma.$disconnect().catch(() => {});
   }

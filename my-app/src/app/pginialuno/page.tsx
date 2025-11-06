@@ -1,8 +1,8 @@
 "use client";
 import React, { JSX, useEffect, useState, useCallback } from "react";
 import styles from "./page.module.css";
-import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import ClientOnlyText from "../../components/ClientOnlyText";
 
 // Dynamically load the plugged MCQ component (client-only)
@@ -12,7 +12,12 @@ type PluggedContagemMCQProps = {
   alunoId?: number | null;
   initialLoad?: boolean;
   autoSave?: boolean;
+  atividadeId?: number | null;
+  turmaId?: number | null;
+  // `respostas` opcional para compatibilidade com carregamento dinâmico
+  respostas?: { alternativa: string; contador: number }[];
 };
+
 const PluggedContagemMCQ = dynamic<PluggedContagemMCQProps>(
   () => import("../../components/PluggedContagemMCQ").then((m) => m.default),
   { ssr: false }
@@ -90,7 +95,7 @@ export default function Page(): JSX.Element {
   const [respostaTexto, setRespostaTexto] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
 
-  const router = useRouter();
+  // router removido (não estava em uso)
 
   // Estado para a resposta do aluno (nota + feedback) mostrada no modal de desempenho
   const [minhaResposta, setMinhaResposta] = useState<RespostaResumo | null>(
@@ -101,13 +106,38 @@ export default function Page(): JSX.Element {
   // Keep local state in sync with storage if something else sets it later
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const id = localStorage.getItem("idAluno");
-    const nome = localStorage.getItem("alunoNome");
-    const email = localStorage.getItem("alunoEmail");
 
-    if (id) setAlunoId(Number(id));
-    if (nome !== null) setAlunoNome(nome);
-    if (email !== null) setAlunoEmail(email);
+    const syncAlunoFromStorage = () => {
+      try {
+        const id = localStorage.getItem("idAluno");
+        const nome = localStorage.getItem("alunoNome");
+        const email = localStorage.getItem("alunoEmail");
+        setAlunoId(id ? Number(id) : null);
+        setAlunoNome(nome ?? "");
+        setAlunoEmail(email ?? "");
+      } catch {
+        /* ignore */
+      }
+    };
+
+    // initial sync
+    syncAlunoFromStorage();
+
+    // sync when localStorage changes in other tabs
+    const onStorage = (ev: StorageEvent) => {
+      if (!ev.key || ev.key.startsWith("aluno")) syncAlunoFromStorage();
+    };
+
+    // custom event to sync inside same tab after we update localStorage programmatically
+    const onAlunoUpdate = () => syncAlunoFromStorage();
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("alunoUpdate", onAlunoUpdate as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("alunoUpdate", onAlunoUpdate as EventListener);
+    };
   }, []);
 
   // Buscar atividades
@@ -144,16 +174,24 @@ export default function Page(): JSX.Element {
         const data = await res.json().catch(() => null);
 
         if (Array.isArray(data)) {
-          setAtividades(data);
-        } else if (data && Array.isArray((data as any).atividades)) {
-          setAtividades((data as any).atividades);
+          setAtividades(data as AtividadeResumo[]);
+        } else if (data && typeof data === "object") {
+          const maybe = data as Record<string, unknown>;
+          if (Array.isArray(maybe.atividades)) {
+            setAtividades(maybe.atividades as AtividadeResumo[]);
+          } else {
+            console.warn("fetchAtividades: resposta inesperada:", data);
+            setAtividades([]);
+          }
         } else {
           console.warn("fetchAtividades: resposta inesperada:", data);
           setAtividades([]);
         }
-      } catch (err: any) {
-        if (err.name === "AbortError") return;
-        console.error("Erro ao buscar atividades:", err);
+      } catch (err: unknown) {
+        const errObj = err as unknown as { name?: unknown };
+        if (errObj.name === "AbortError") return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Erro ao buscar atividades:", msg);
         setAtividades([]);
       } finally {
         setLoading(false);
@@ -187,8 +225,9 @@ export default function Page(): JSX.Element {
           if (sEmail && (!alunoEmail || alunoEmail.length === 0))
             setAlunoEmail(sEmail);
         }
-      } catch (err) {
-        // ignore
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("toggleUserPopup error:", msg);
       }
 
       if (
@@ -241,9 +280,7 @@ export default function Page(): JSX.Element {
     setPopupAberto((p) => !p);
   }, [popupAberto, alunoId, alunoNome, alunoEmail, minhaResposta]);
 
-  const fecharModalDesempenho = useCallback(() => {
-    setModalAberto(false);
-  }, []);
+  // fecharModal não usado aqui — remover para evitar warning
 
   // Abre o modal/section de resolver atividade (na mesma página)
   function abrirResolver(atividade: AtividadeResumo) {
@@ -275,7 +312,7 @@ export default function Page(): JSX.Element {
   }
 
   // envio do formulário inline (mesma página)
-  async function handleEnviarResposta(e?: React.FormEvent) {
+  async function handleEnviarResposta() {
     try {
       setSubmitting(true);
 
@@ -312,9 +349,10 @@ export default function Page(): JSX.Element {
       });
       fecharResolver();
       setAtividadeSelecionada(null);
-    } catch (err: any) {
-      console.error("Erro ao enviar resposta:", err);
-      alert(err?.message || "Erro ao enviar resposta.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao enviar resposta:", msg);
+      alert(msg || "Erro ao enviar resposta.");
     } finally {
       setSubmitting(false);
     }
@@ -344,23 +382,38 @@ export default function Page(): JSX.Element {
       return;
     }
     setLoadingMinhaResposta(true);
+
     try {
       const res = await fetch(
         `/api/respostas?atividadeId=${encodeURIComponent(String(atividadeId))}`
       );
       const data = await res.json().catch(() => null);
+
       if (!res.ok) {
         console.warn("fetchMinhaResposta: non-ok", res.status, data);
         setMinhaResposta(null);
         return;
       }
+
+      const findMatchingResposta = (
+        arr: unknown[]
+      ): RespostaResumo | undefined => {
+        return arr.find((item) => {
+          const rr = item as Partial<
+            RespostaResumo & { aluno?: { idAluno?: unknown } }
+          >;
+          if (typeof rr.idAluno === "number" && rr.idAluno === alunoId)
+            return true;
+          if (rr.aluno && typeof rr.aluno.idAluno === "number")
+            return Number(rr.aluno.idAluno) === Number(alunoId);
+          return false;
+        }) as RespostaResumo | undefined;
+      };
+
       if (Array.isArray(data)) {
-        const found = data.find(
-          (r: any) =>
-            r.idAluno === alunoId ||
-            (r.aluno && Number(r.aluno.idAluno) === Number(alunoId))
-        );
+        const found = findMatchingResposta(data);
         setMinhaResposta(found ?? null);
+
         if (found?.aluno) {
           if (!alunoNome || alunoNome.length === 0)
             setAlunoNome(found.aluno.nome ?? "");
@@ -372,35 +425,48 @@ export default function Page(): JSX.Element {
                 localStorage.setItem("alunoNome", found.aluno.nome);
               if (found.aluno.email)
                 localStorage.setItem("alunoEmail", found.aluno.email);
+              if (found.aluno.idAluno)
+                localStorage.setItem("idAluno", String(found.aluno.idAluno));
+              window.dispatchEvent(new Event("alunoUpdate"));
             }
-          } catch {}
+          } catch {
+            /* ignore storage errors */
+          }
         }
-      } else if (data && Array.isArray(data.respostas)) {
-        const found = data.respostas.find(
-          (r: any) =>
-            r.idAluno === alunoId ||
-            (r.aluno && Number(r.aluno.idAluno) === Number(alunoId))
-        );
-        setMinhaResposta(found ?? null);
-        if (found?.aluno) {
-          if (!alunoNome || alunoNome.length === 0)
-            setAlunoNome(found.aluno.nome ?? "");
-          if (!alunoEmail || alunoEmail.length === 0)
-            setAlunoEmail(found.aluno.email ?? "");
-          try {
-            if (typeof window !== "undefined") {
-              if (found.aluno.nome)
-                localStorage.setItem("alunoNome", found.aluno.nome);
-              if (found.aluno.email)
-                localStorage.setItem("alunoEmail", found.aluno.email);
+      } else if (data && typeof data === "object") {
+        const maybe = data as Record<string, unknown>;
+        if (Array.isArray(maybe.respostas)) {
+          const found = findMatchingResposta(maybe.respostas as unknown[]);
+          setMinhaResposta(found ?? null);
+
+          if (found?.aluno) {
+            if (!alunoNome || alunoNome.length === 0)
+              setAlunoNome(found.aluno.nome ?? "");
+            if (!alunoEmail || alunoEmail.length === 0)
+              setAlunoEmail(found.aluno.email ?? "");
+            try {
+              if (typeof window !== "undefined") {
+                if (found.aluno.nome)
+                  localStorage.setItem("alunoNome", found.aluno.nome);
+                if (found.aluno.email)
+                  localStorage.setItem("alunoEmail", found.aluno.email);
+                if (found.aluno.idAluno)
+                  localStorage.setItem("idAluno", String(found.aluno.idAluno));
+                window.dispatchEvent(new Event("alunoUpdate"));
+              }
+            } catch {
+              /* ignore storage errors */
             }
-          } catch {}
+          }
+        } else {
+          setMinhaResposta(null);
         }
       } else {
         setMinhaResposta(null);
       }
-    } catch (err) {
-      console.error("Erro ao buscar minha resposta:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao buscar minha resposta:", msg);
       setMinhaResposta(null);
     } finally {
       setLoadingMinhaResposta(false);
@@ -412,18 +478,27 @@ export default function Page(): JSX.Element {
       alert("Selecione uma atividade antes de ver o desempenho.");
       return;
     }
-    await fetchMinhaRespostaParaAtividade(atividadeSelecionada.idAtividade);
-    setModalAberto(true);
+    try {
+      await fetchMinhaRespostaParaAtividade(atividadeSelecionada.idAtividade);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao buscar desempenho:", msg);
+      // continua — abrimos o modal para mostrar mensagem apropriada ao usuário
+    } finally {
+      setModalAberto(true);
+    }
   }
 
   return (
     <div className={styles.paginaAlunoBody}>
       <aside className={styles.paginaAlunoAside}>
         <div className={styles.logoContainer}>
-          <img
+          <Image
             className={styles.logoImg}
             src="/images/logopng.png"
             alt="Logo Codemind"
+            width={160}
+            height={48}
           />
         </div>
         <h2>Minhas Atividades</h2>
@@ -445,10 +520,12 @@ export default function Page(): JSX.Element {
               onClick={toggleUserPopup}
               style={{ cursor: "pointer" }}
             >
-              <img
+              <Image
                 className={styles.userAvatar}
                 src="https://www.gravatar.com/avatar/?d=mp"
                 alt="Avatar"
+                width={40}
+                height={40}
               />
               <div className={styles.userDetails}>
                 <span className={styles.userName}>
@@ -541,8 +618,8 @@ export default function Page(): JSX.Element {
                 onClick={() => mostrarDetalhe(a)}
                 role="button"
                 tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") mostrarDetalhe(a);
+                onKeyDown={(_e) => {
+                  if (_e.key === "Enter" || _e.key === " ") mostrarDetalhe(a);
                 }}
                 aria-label={`Abrir detalhes da atividade ${a.titulo}`}
               >
@@ -638,13 +715,13 @@ export default function Page(): JSX.Element {
               {atividadeSelecionada.tipo === "PLUGGED" ? (
                 <div style={{ marginTop: 12 }}>
                   <PluggedContagemMCQ
-                    fetchEndpoint={`/api/atividades/plugged/contagem-instance?turmaId=${
-                      atividadeSelecionada.turma?.idTurma ?? ""
-                    }`}
+                    fetchEndpoint="/api/atividades/plugged/contagem-instance"
                     saveEndpoint="/api/respostas/plugged"
                     alunoId={alunoId}
                     initialLoad={true}
                     autoSave={true}
+                    atividadeId={atividadeSelecionada.idAtividade}
+                    turmaId={atividadeSelecionada.turma?.idTurma ?? null}
                   />
                   <div style={{ marginTop: 18, display: "flex", gap: 8 }}>
                     <button className={styles.btn} onClick={voltarParaLista}>

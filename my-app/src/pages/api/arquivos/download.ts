@@ -1,3 +1,5 @@
+import { NextApiRequest, NextApiResponse } from "next";
+
 export function downloadAttachmentOpen(attachmentId: number) {
   // se a autenticação utilizar cookies/session, abrir a url basta
   const url = `/api/attachments/${attachmentId}`;
@@ -29,4 +31,30 @@ export async function downloadAttachmentFetch(
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// supondo que já exista uma função named `downloadHandler(req, res)`
+// apenas adicione um default export compatível com Next.js API:
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    // se já houver uma função pronta em globalThis:
+    const g = globalThis as Record<string, unknown>;
+    const maybeHandler = g.downloadHandler;
+    if (typeof maybeHandler === "function") {
+      const handlerFn = maybeHandler as (
+        req: NextApiRequest,
+        res: NextApiResponse
+      ) => Promise<void> | void;
+      return await handlerFn(req, res);
+    }
+    // ou reproduza a lógica diretamente aqui
+    res.status(500).send("handler not implemented");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("download api error:", msg);
+    res.status(500).json({ error: "internal" });
+  }
 }

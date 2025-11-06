@@ -39,15 +39,39 @@ export default function UploadArquivos({
         method: "POST",
         body: fd,
       });
-      const data = await res.json().catch(() => null);
-      setResult(data);
-      if (!res.ok) {
-        alert(data?.error || `Erro no upload (status ${res.status})`);
+      const data = (await res.json().catch(() => null)) as unknown;
+      // normalize/set result only when shape parece correto
+      if (data && typeof data === "object") {
+        setResult(data as UploadResult);
       } else {
-        alert(`Upload finalizado: ${data.uploaded} arquivos`);
+        setResult(null);
+      }
+      if (!res.ok) {
+        const errMsg =
+          data && typeof data === "object"
+            ? String(
+                (data as Record<string, unknown>).error ??
+                  (data as Record<string, unknown>).message ??
+                  `status ${res.status}`
+              )
+            : `Erro no upload (status ${res.status})`;
+        alert(errMsg);
+      } else {
+        const uploadedCount =
+          data &&
+          typeof data === "object" &&
+          "uploaded" in (data as Record<string, unknown>)
+            ? Number((data as Record<string, unknown>).uploaded)
+            : null;
+        alert(
+          uploadedCount != null
+            ? `Upload finalizado: ${uploadedCount} arquivos`
+            : "Upload finalizado."
+        );
       }
     } catch (err) {
-      console.error("Erro upload cliente:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro upload cliente:", msg);
       alert("Erro de rede no upload");
     } finally {
       setLoading(false);

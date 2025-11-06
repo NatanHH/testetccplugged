@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, ChangeEvent } from "react";
 import styles from "./page.module.css";
+import Image from "next/image";
 
 /**
  * PainelAdm (com CRUD completo de Atividades e CRUD básico de Professores)
@@ -14,6 +15,37 @@ import styles from "./page.module.css";
 
 type Professor = { idProfessor: number; nome: string; email: string };
 type Alt = { texto: string; id?: number };
+
+// --- new lightweight types (não alteram comportamento em runtime) ---
+type ArquivoResumo = {
+  idArquivo: number;
+  url: string;
+  nomeArquivo?: string | null;
+  tipoArquivo?: string | null;
+};
+
+type Atividade = {
+  idAtividade: number;
+  titulo: string;
+  descricao?: string | null;
+  tipo?: string | null;
+  nota?: number | null;
+  script?: string | null;
+  linguagem?: string | null;
+  arquivos?: ArquivoResumo[];
+  alternativas?: Alt[];
+};
+
+type AtividadePayload = {
+  titulo: string;
+  descricao?: string | null;
+  tipo: string;
+  nota?: number;
+  script?: string | null;
+  linguagem?: string | null;
+  alternativas?: Alt[] | null;
+};
+// --- end new types ---
 
 export default function PainelAdm() {
   // Professores
@@ -40,7 +72,7 @@ export default function PainelAdm() {
   const [loading, setLoading] = useState(false);
 
   // Atividades
-  const [atividades, setAtividades] = useState<any[]>([]);
+  const [atividades, setAtividades] = useState<Atividade[]>([]);
   const [loadingAtividades, setLoadingAtividades] = useState(false);
   const [formAtividade, setFormAtividade] = useState({
     titulo: "",
@@ -64,7 +96,6 @@ export default function PainelAdm() {
   // ---------------------- Professores CRUD (frontend) ----------------------
   useEffect(() => {
     if (funcaoSelecionada === "Professores") fetchProfessores();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [funcaoSelecionada, showForm, editingProfessor]);
 
   async function fetchProfessores() {
@@ -72,22 +103,26 @@ export default function PainelAdm() {
     try {
       const res = await fetch("/api/professores/professor");
       const text = await res.text().catch(() => "");
-      let data: any = null;
+      let data: unknown = null;
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
         data = null;
       }
       if (res.ok) {
-        if (Array.isArray(data)) setProfessores(data);
-        else if (data && Array.isArray(data.professores))
-          setProfessores(data.professores);
-        else setProfessores([]);
+        if (Array.isArray(data)) setProfessores(data as Professor[]);
+        else if (data && typeof data === "object") {
+          const maybe = data as Record<string, unknown>;
+          if (Array.isArray(maybe.professores))
+            setProfessores(maybe.professores as Professor[]);
+          else setProfessores([]);
+        } else setProfessores([]);
       } else {
         setProfessores([]);
       }
     } catch (err) {
-      console.error("Erro fetching professores:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro fetching professores:", msg);
       setProfessores([]);
     } finally {
       setLoading(false);
@@ -208,7 +243,6 @@ export default function PainelAdm() {
   // ---------------------- Atividades CRUD (frontend) ----------------------
   useEffect(() => {
     if (funcaoSelecionada === "Atividades") fetchAtividades();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [funcaoSelecionada]);
 
   async function fetchAtividades() {
@@ -216,22 +250,26 @@ export default function PainelAdm() {
     try {
       const res = await fetch("/api/atividades");
       const text = await res.text().catch(() => "");
-      let data: any = null;
+      let data: unknown = null;
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
         data = null;
       }
       if (res.ok) {
-        if (Array.isArray(data)) setAtividades(data);
-        else if (data && Array.isArray(data.atividades))
-          setAtividades(data.atividades);
-        else setAtividades([]);
+        if (Array.isArray(data)) setAtividades(data as Atividade[]);
+        else if (data && typeof data === "object") {
+          const maybe = data as Record<string, unknown>;
+          if (Array.isArray(maybe.atividades))
+            setAtividades(maybe.atividades as Atividade[]);
+          else setAtividades([]);
+        } else setAtividades([]);
       } else {
         setAtividades([]);
       }
     } catch (err) {
-      console.error("Erro fetching atividades:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro fetching atividades:", msg);
       setAtividades([]);
     } finally {
       setLoadingAtividades(false);
@@ -278,7 +316,7 @@ export default function PainelAdm() {
   }
 
   // Start editing an existing activity - populates form with data
-  function startEditAtividade(atividade: any) {
+  function startEditAtividade(atividade: Atividade) {
     setEditingAtividadeId(atividade.idAtividade);
     setFormAtividade({
       titulo: atividade.titulo || "",
@@ -289,7 +327,9 @@ export default function PainelAdm() {
       linguagem: atividade.linguagem ?? "assemblyscript",
     });
     // set previews for existing arquivos (URLs)
-    const previews = (atividade.arquivos || []).map((f: any) => f.url);
+    const previews = (atividade.arquivos || []).map(
+      (f: ArquivoResumo) => f.url
+    );
     setArquivosPreviews(previews);
     setArquivos([]); // new files not selected yet
   }
@@ -350,7 +390,7 @@ export default function PainelAdm() {
     // apenas UNPLUGGED suportado — sem validações de alternativas
 
     // payload for JSON operations
-    const payload: any = {
+    const payload: AtividadePayload = {
       titulo: formAtividade.titulo,
       descricao: formAtividade.descricao,
       tipo: formAtividade.tipo,
@@ -480,10 +520,12 @@ export default function PainelAdm() {
       {/* Sidebar */}
       <aside className={styles.paginaAlunoAside}>
         <div className={styles.logoContainer}>
-          <img
+          <Image
             className={styles.logoImg}
             src="/images/Logopng.png"
             alt="Logo Codemind"
+            width={160}
+            height={48}
           />
         </div>
         <h2>Minhas Funções</h2>
@@ -517,10 +559,13 @@ export default function PainelAdm() {
               onClick={toggleUserPopup}
               style={{ cursor: "pointer" }}
             >
-              <img
+              <Image
                 className={styles.userAvatar}
                 src="https://www.gravatar.com/avatar/?d=mp"
                 alt="Avatar"
+                width={40}
+                height={40}
+                unoptimized
               />
               <div className={styles.userDetails}>
                 <span className={styles.userName}>ADM</span>
@@ -940,7 +985,7 @@ export default function PainelAdm() {
                 {atividades.length === 0 && (
                   <li>Nenhuma atividade cadastrada.</li>
                 )}
-                {atividades.map((a: any) => (
+                {atividades.map((a: Atividade) => (
                   <li key={a.idAtividade} style={{ marginBottom: 12 }}>
                     <strong>{a.titulo}</strong> ({a.tipo}) - Nota: {a.nota}
                     <br />
@@ -965,7 +1010,7 @@ export default function PainelAdm() {
                       <div style={{ marginTop: 8 }}>
                         <strong>Arquivos:</strong>
                         <ul>
-                          {a.arquivos.map((f: any) => (
+                          {a.arquivos!.map((f: ArquivoResumo) => (
                             <li
                               key={f.idArquivo}
                               style={{

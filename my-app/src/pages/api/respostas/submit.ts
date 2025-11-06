@@ -31,8 +31,9 @@ export default async function handler(
     });
 
     return res.status(201).json({ ok: true, created });
-  } catch (err: any) {
-    console.error("Error POST /api/respostas/submit:", err);
-    return res.status(500).json({ error: err?.message ?? "Erro interno" });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Error POST /api/respostas/submit:", msg);
+    return res.status(500).json({ error: msg || "Erro interno" });
   }
 }

@@ -1,21 +1,32 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { JSX, useEffect, useState } from "react";
 
 type Student = { id: number; nome: string; email?: string };
 type Stats = { totalAttempts: number; correct: number };
 
+type AlunoDesempenho = {
+  alunoId: number;
+  nome: string;
+  nota?: number | null;
+};
+
+type Props = {
+  dados: AlunoDesempenho[];
+  onClose?: () => void;
+  turmaId?: number | null;
+  atividadeId?: number | null;
+  studentsEndpoint?: string | null;
+  statsEndpointBase?: string | null;
+};
+
 export default function DesempenhoAlunos({
+  dados: _dados,
+  onClose: _onClose,
   turmaId,
   atividadeId,
   studentsEndpoint,
   statsEndpointBase,
-}: {
-  turmaId?: number | null;
-  atividadeId?: number | null;
-  // endpoints opcionais (se não setados, o componente monta defaults)
-  studentsEndpoint?: string;
-  statsEndpointBase?: string;
-}) {
+}: Props): JSX.Element {
   const [students, setStudents] = useState<Student[] | null>(null);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -41,24 +52,28 @@ export default function DesempenhoAlunos({
       .then((j) => {
         // normalize incoming shapes (ex.: { idAluno, nome, email } ou { id, nome, email })
         const raw = Array.isArray(j) ? j : j?.alunos ?? [];
-        const normalized = (raw as any[])
-          .map((x) => ({
-            id: Number(
-              x.id ?? x.idAluno ?? x.id_aluno ?? x.alunoId ?? x.aluno?.id
-            ),
-            nome: x.nome ?? x.name ?? x.aluno?.nome ?? "",
-            email: x.email ?? x.mail ?? x.aluno?.email ?? "",
-          }))
+        const normalized = (raw as unknown[])
+          .map((x) => {
+            const rec = x as Record<string, unknown>;
+            const alunoObj = (rec.aluno ?? {}) as Record<string, unknown>;
+            const id = Number(
+              rec.id ??
+                rec.idAluno ??
+                rec.id_aluno ??
+                rec.alunoId ??
+                alunoObj.id
+            );
+            const nome = String(rec.nome ?? rec.name ?? alunoObj.nome ?? "");
+            const email = String(rec.email ?? rec.mail ?? alunoObj.email ?? "");
+            return { id, nome, email };
+          })
           .filter((s) => !Number.isNaN(s.id));
         setStudents(normalized);
       })
-      .catch((e: any) => {
-        console.error("failed to load students:", e);
-        setError(
-          `Erro ao carregar lista de alunos. (${
-            e?.message?.toString?.() ?? "unknown"
-          })`
-        );
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("failed to load students:", msg);
+        setError(`Erro ao carregar lista de alunos. (${msg})`);
         setStudents([]);
       })
       .finally(() => setLoadingStudents(false));
@@ -75,6 +90,7 @@ export default function DesempenhoAlunos({
     q.searchParams.set("alunoId", String(alunoId));
     if (atividadeId != null)
       q.searchParams.set("atividadeId", String(atividadeId));
+    if (turmaId != null) q.searchParams.set("turmaId", String(turmaId)); // <- important for plugged
     try {
       const r = await fetch(q.toString());
       if (!r.ok) {

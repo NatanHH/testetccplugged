@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -32,8 +32,10 @@ async function fixSequence() {
     } else {
       console.log("DB provider não identificado, pulei ajuste de sequência.");
     }
-  } catch (e) {
-    console.error("Erro ao ajustar sequência:", e);
+  } catch (e: unknown) {
+    const message =
+      e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+    console.error("Erro ao ajustar sequência:", message);
   }
 }
 
@@ -50,33 +52,33 @@ A cada abertura da atividade um número binário aleatório será gerado e o alu
 
   if (existente) {
     // Atualiza campos relevantes (mantendo outras propriedades)
+    const updateData: Prisma.AtividadeUpdateInput = {
+      titulo,
+      descricao,
+      tipo: "PLUGGED",
+      isStatic: true,
+      source: "builtin",
+      nota: 10,
+    };
+
     const updated = await prisma.atividade.update({
       where: { idAtividade: existente.idAtividade },
-      data: {
-        titulo,
-        descricao,
-        tipo: "PLUGGED",
-        // marcar como estática (se o campo existir no schema)
-        isStatic: true as any,
-        source: "builtin" as any,
-        // nota obrigatória para atividade PLUGGED
-        nota: 10 as any,
-      } as any,
+      data: updateData,
     });
     console.log(`Seed: atividade atualizada (id: ${updated.idAtividade})`);
   } else {
     // Cria a atividade
+    const createData: Prisma.AtividadeCreateInput = {
+      titulo,
+      descricao,
+      tipo: "PLUGGED",
+      isStatic: true,
+      source: "builtin",
+      nota: 10,
+    };
+
     const created = await prisma.atividade.create({
-      data: {
-        titulo,
-        descricao,
-        tipo: "PLUGGED",
-        // marque como estática se o schema tiver estes campos
-        isStatic: true as any,
-        source: "builtin" as any,
-        // nota padrão para esta atividade
-        nota: 10 as any,
-      } as any,
+      data: createData,
     });
     console.log(`Seed: atividade criada (id: ${created.idAtividade})`);
   }
@@ -86,8 +88,10 @@ A cada abertura da atividade um número binário aleatório será gerado e o alu
 }
 
 main()
-  .catch((e) => {
-    console.error("Seed error:", e);
+  .catch((e: unknown) => {
+    const message =
+      e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+    console.error("Seed error:", message);
     process.exit(1);
   })
   .finally(async () => {

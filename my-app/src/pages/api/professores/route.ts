@@ -1,5 +1,6 @@
 // Ajuste o caminho do import abaixo conforme seu projeto
 import prisma from "../../../lib/prisma"; // <- ajuste se necessário
+import type { NextApiRequest, NextApiResponse } from "next";
 
 function corsHeaders() {
   return {
@@ -55,12 +56,19 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error("POST /api/professor", err);
-    return new Response(
-      JSON.stringify({ error: "Erro ao criar professor" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: "Erro ao criar professor" }), {
+      status: 500,
+      headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    });
   }
+}
+
+// Se você precisa manter um fallback estilo pages API, use tipos do Next
+// Caso use apenas App Router (GET/POST nomeados) remova este export default.
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  res.setHeader("Allow", "GET, POST, OPTIONS");
+  return res.status(405).json({ error: "Method not allowed" });
 }

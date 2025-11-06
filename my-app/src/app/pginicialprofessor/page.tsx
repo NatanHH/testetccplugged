@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import styles from "./page.module.css";
 import React from "react";
 import { useRouter } from "next/navigation";
@@ -12,6 +13,8 @@ type PluggedContagemMCQProps = {
   saveEndpoint: string;
   alunoId?: number | null;
   initialLoad?: boolean;
+  atividadeId?: number;
+  turmaId?: number | null;
 };
 // Use the props generic so Next's dynamic loader signature aligns with the component props
 const PluggedContagemMCQ = dynamic<PluggedContagemMCQProps>(
@@ -66,6 +69,15 @@ export default function PageProfessor() {
   const [atividadeDetalhe, setAtividadeDetalhe] = useState<Atividade | null>(
     null
   );
+  // atividade selecionada dentro do modal de desempenho (padrão = a atividade clicada)
+  const [modalSelectedAtividadeId, setModalSelectedAtividadeId] = useState<
+    number | null
+  >(null);
+
+  // controla se o modal de desempenho renderiza o modo "plugged" (com componente) ou "unplugged" (lista de respostas)
+  const [desempenhoView, setDesempenhoView] = useState<"plugged" | "unplugged">(
+    "unplugged"
+  );
 
   const [atividades, setAtividades] = useState<Atividade[]>([]);
   const [atividadesTurma, setAtividadesTurma] = useState<Atividade[]>([]);
@@ -101,9 +113,9 @@ export default function PageProfessor() {
   const [atividadeParaAplicar, setAtividadeParaAplicar] =
     useState<Atividade | null>(null);
 
-  const [turmaSelecionadaParaAplicacao, setTurmaSelecionadaParaAplicacao] =
+  const [_turmaSelecionadaParaAplicacao, setTurmaSelecionadaParaAplicacao] =
     useState<Turma | null>(null);
-  const [confirmApplyModalOpen, setConfirmApplyModalOpen] = useState(false);
+  const [_confirmApplyModalOpen, setConfirmApplyModalOpen] = useState(false);
 
   const [turmasSelecionadas, setTurmasSelecionadas] = useState<number[]>([]);
   const [isApplying, setIsApplying] = useState(false);
@@ -133,26 +145,27 @@ export default function PageProfessor() {
   }, []);
 
   // --- funções existentes preservadas (fetchTurmas, fetchAtividades, fetchAtividadesTurma, etc.) ---
-  async function fetchTurmas() {
+  const fetchTurmas = useCallback(async () => {
     if (!professorId) return;
     setLoadingTurmas(true);
     try {
       const res = await fetch(`/api/turma?professorId=${professorId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (Array.isArray(data)) setTurmas(data);
       else setTurmas([]);
-    } catch (err) {
-      console.error("Erro ao buscar turmas:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao buscar turmas:", msg);
       setTurmas([]);
     } finally {
       setLoadingTurmas(false);
     }
-  }
+  }, [professorId]);
 
   useEffect(() => {
     if (professorId) fetchTurmas();
-  }, [professorId]);
+  }, [professorId, fetchTurmas]);
 
   useEffect(() => {
     if (!turmaSelecionada) {
@@ -161,22 +174,29 @@ export default function PageProfessor() {
     } else {
       fetchAtividadesTurma(turmaSelecionada.idTurma);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turmaSelecionada, professorId]);
 
   async function fetchAtividades() {
     setLoadingAtividades(true);
     try {
       const res = await fetch(`/api/professores/atividadesprofessor`);
-      const data = await res.json().catch(() => null);
+      const data = (await res.json().catch(() => null)) as unknown;
       if (res.ok) {
-        if (Array.isArray(data)) setAtividades(data);
-        else if (data && Array.isArray(data.atividades))
-          setAtividades(data.atividades);
-        else setAtividades([]);
-      } else setAtividades([]);
-    } catch (err) {
-      console.error("Erro fetching atividades:", err);
+        if (Array.isArray(data)) setAtividades(data as Atividade[]);
+        else if (data && typeof data === "object") {
+          const maybe = data as Record<string, unknown>;
+          if (Array.isArray(maybe.atividades))
+            setAtividades(maybe.atividades as Atividade[]);
+          else setAtividades([]);
+        } else {
+          setAtividades([]);
+        }
+      } else {
+        setAtividades([]);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro fetching atividades:", msg);
       setAtividades([]);
     } finally {
       setLoadingAtividades(false);
@@ -196,52 +216,58 @@ export default function PageProfessor() {
         setAtividadesTurma([]);
         return;
       }
-      let arr = data;
+      let arr: unknown = data;
       if (!Array.isArray(arr)) {
-        if (data && Array.isArray(data.atividades)) arr = data.atividades;
+        if (
+          data &&
+          typeof data === "object" &&
+          Array.isArray((data as Record<string, unknown>).atividades)
+        )
+          arr = (data as Record<string, unknown>).atividades;
         else {
           setAtividadesTurma([]);
           return;
         }
       }
-      const normalized: Atividade[] = arr.map((item: any) => {
-        if (item.atividade || item.idAtividadeTurma) {
-          const at = item.atividade ?? {
-            idAtividade: item.idAtividade,
-            titulo: item.titulo,
-            descricao: item.descricao,
-            tipo: item.tipo,
-            nota: item.nota,
-            isStatic: item.isStatic,
-            source: item.source,
-            arquivos: item.atividade?.arquivos ?? item.arquivos ?? [],
-          };
+      const normalized: Atividade[] = (arr as unknown[]).map(
+        (item: unknown) => {
+          const it = item as Record<string, unknown>;
+          const atividadeObj = (it.atividade ?? it) as Record<string, unknown>;
+          const arquivos = (atividadeObj.arquivos ??
+            it.arquivos ??
+            []) as unknown[];
           return {
-            idAtividade: Number(at.idAtividade),
-            titulo: at.titulo,
-            descricao: at.descricao,
-            tipo: at.tipo,
-            nota: at.nota,
-            isStatic: at.isStatic,
-            source: at.source,
-            arquivos: at.arquivos ?? [],
-          } as Atividade;
-        } else {
-          return {
-            idAtividade: Number(item.idAtividade),
-            titulo: item.titulo,
-            descricao: item.descricao,
-            tipo: item.tipo,
-            nota: item.nota,
-            isStatic: item.isStatic,
-            source: item.source,
-            arquivos: item.arquivos ?? [],
+            idAtividade: Number(
+              atividadeObj.idAtividade ?? atividadeObj.idAtividadeTurma
+            ),
+            titulo: String(
+              atividadeObj.titulo ??
+                `Atividade ${atividadeObj.idAtividade ?? ""}`
+            ),
+            descricao: atividadeObj.descricao as string | undefined,
+            tipo: atividadeObj.tipo as string | undefined,
+            nota:
+              typeof atividadeObj.nota === "number"
+                ? (atividadeObj.nota as number)
+                : undefined,
+            isStatic: atividadeObj.isStatic as boolean | undefined,
+            source: atividadeObj.source as string | undefined,
+            arquivos: (arquivos as unknown[]).map((f) => {
+              const ff = f as Record<string, unknown>;
+              return {
+                idArquivo: Number(ff.idArquivo ?? 0),
+                url: String(ff.url ?? ""),
+                tipoArquivo: ff.tipoArquivo as string | undefined,
+                nomeArquivo: ff.nomeArquivo as string | undefined,
+              };
+            }),
           } as Atividade;
         }
-      });
+      );
       setAtividadesTurma(normalized);
     } catch (err) {
-      console.error("Erro fetching atividades da turma:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro fetching atividades da turma:", msg);
       setAtividadesTurma([]);
     } finally {
       setLoadingAtividades(false);
@@ -305,17 +331,19 @@ export default function PageProfessor() {
         alert(data?.error || "Erro ao criar turma.");
       }
     } catch (err) {
-      console.error("Erro ao criar turma:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao criar turma:", msg);
       alert("Erro de conexão ao criar turma.");
     } finally {
       setIsCreatingTurma(false);
     }
   }
 
-  function mostrarDesempenho() {
+  // prefixadas com '_' porque atualmente não são referenciadas em outros lugares
+  function _mostrarDesempenho() {
     setModalDesempenhoAberto(true);
   }
-  function fecharModalDesempenho() {
+  function _fecharModalDesempenho() {
     setModalDesempenhoAberto(false);
   }
 
@@ -394,7 +422,7 @@ export default function PageProfessor() {
               idTurma,
             }),
           });
-          let data: any = null;
+          let data: unknown = null;
           try {
             data = await res.json();
           } catch {
@@ -402,7 +430,11 @@ export default function PageProfessor() {
           }
           return { idTurma, ok: res.ok, status: res.status, data };
         } catch (err) {
-          return { idTurma, ok: false, err };
+          return {
+            idTurma,
+            ok: false,
+            err: err instanceof Error ? err.message : String(err),
+          };
         }
       });
 
@@ -421,7 +453,11 @@ export default function PageProfessor() {
             const turma = turmas.find((t) => t.idTurma === f.idTurma);
             const nome = turma?.nome ?? `Turma ${f.idTurma}`;
             const errMsg =
-              f.data?.error || (f.err && String(f.err)) || `status ${f.status}`;
+              (f.data &&
+                typeof f.data === "object" &&
+                (f.data as Record<string, unknown>).error) ||
+              (f.err && String(f.err)) ||
+              `status ${f.status}`;
             return `${nome}: ${errMsg}`;
           })
           .join("\n");
@@ -442,7 +478,8 @@ export default function PageProfessor() {
   }
 
   // abrirAtividadeArquivo e excluirTurma preservados (mantidos)
-  function openAtividadeArquivo(atividade: Atividade) {
+  // renomeada para evitar warning quando não referenciada
+  function _openAtividadeArquivo(atividade: Atividade) {
     try {
       const arquivos = atividade.arquivos ?? [];
       if (arquivos.length === 0) {
@@ -454,8 +491,9 @@ export default function PageProfessor() {
         ? url
         : `${window.location.origin}${url}`;
       window.open(finalUrl, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      console.error("Erro ao abrir arquivo da atividade:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao abrir arquivo da atividade:", msg);
       alert("Não foi possível abrir o arquivo. Veja o console.");
     }
   }
@@ -488,6 +526,92 @@ export default function PageProfessor() {
     }
   }
 
+  // Helper: extrai um id de atividade confiável de várias formas de objeto
+  function getAtividadeIdFrom(obj: unknown): number | null {
+    if (!obj) return null;
+    const o = obj as Record<string, unknown>;
+    const cand =
+      o.idAtividade ??
+      o.idAtividadeTurma ??
+      (o.atividade as Record<string, unknown>)?.idAtividade;
+    if (cand == null || cand === "") return null;
+    const n = Number(cand);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // Abre modal de desempenho garantindo id/objeto normalizado
+  async function mostrarDesempenhoParaAtividadeAplicada(atividade: unknown) {
+    // exige seleção de turma em contexto de visualização por turma
+    if (!turmaSelecionada) {
+      alert("Selecione uma turma primeiro.");
+      return;
+    }
+
+    const id = getAtividadeIdFrom(atividade);
+    if (!id) {
+      alert("Não foi possível identificar a atividade para ver o desempenho.");
+      return;
+    }
+
+    // normaliza o objeto recebido (pode ser a atividade ou um wrapper { atividade, ... })
+    const a = atividade as Record<string, unknown>;
+    const atividadeObj = (a.atividade ?? a) as Record<string, unknown>;
+
+    const titulo = (atividadeObj.titulo ??
+      a.titulo ??
+      `Atividade ${id}`) as string;
+    const descricao = (atividadeObj.descricao ?? a.descricao ?? "") as
+      | string
+      | undefined;
+    const tipo = (atividadeObj.tipo ?? a.tipo) as string | undefined;
+
+    const arquivosRaw = (atividadeObj.arquivos ??
+      a.arquivos ??
+      []) as unknown[];
+    const arquivos: Arquivo[] = arquivosRaw.map((f) => {
+      const ff = f as Record<string, unknown>;
+      return {
+        idArquivo: Number(ff.idArquivo ?? 0),
+        url: String(ff.url ?? ""),
+        tipoArquivo: ff.tipoArquivo as string | undefined,
+      };
+    });
+
+    const normalized: Atividade = {
+      idAtividade: id,
+      titulo,
+      descricao,
+      tipo,
+      arquivos,
+    };
+
+    // normaliza e abre modal — primeiro busca as respostas para já ter os dados
+    setExpandedAtividadeId(normalized.idAtividade);
+    setAtividadeDetalhe(normalized);
+    setModalSelectedAtividadeId(normalized.idAtividade);
+
+    // escolhe modo de visualização conforme tipo da atividade
+    const mode =
+      (normalized.tipo ?? "").toUpperCase() === "PLUGGED"
+        ? "plugged"
+        : "unplugged";
+    setDesempenhoView(mode);
+
+    // carrega respostas antes de abrir (para a UI unplugged mostrar a lista)
+    try {
+      await fetchRespostasParaAtividade(
+        normalized.idAtividade,
+        turmaSelecionada.idTurma
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro ao pré-carregar respostas:", msg);
+      // continua mesmo em erro
+    }
+
+    setModalDesempenhoAberto(true);
+  }
+
   // --- NOVO: buscar respostas para a atividade aplicada na turma selecionada (preservado) ---
   const fetchRespostasParaAtividade = useCallback(
     async (idAtividade: number, idTurma?: number) => {
@@ -502,47 +626,193 @@ export default function PageProfessor() {
             String(idAtividade)
           )}${turmaQuery}`
         );
-        const data = await res.json().catch(() => null);
-        if (res.ok && Array.isArray(data))
-          setRespostas(data as RespostaResumo[]);
-        else if (res.ok && data && Array.isArray((data as any).respostas))
-          setRespostas((data as any).respostas as RespostaResumo[]);
-        else setRespostas([]);
-      } catch (err) {
-        console.error("Erro ao buscar respostas:", err);
+        const data = (await res.json().catch(() => null)) as unknown;
+        if (res.ok) {
+          if (Array.isArray(data)) {
+            setRespostas(data as RespostaResumo[]);
+          } else if (data && typeof data === "object") {
+            const maybe = data as Record<string, unknown>;
+            if (Array.isArray(maybe.respostas))
+              setRespostas(maybe.respostas as RespostaResumo[]);
+            else setRespostas([]);
+          } else {
+            setRespostas([]);
+          }
+        } else {
+          setRespostas([]);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Erro ao buscar respostas:", msg);
         setRespostas([]);
       } finally {
+        // garante que o indicador de loading seja sempre desligado
         setLoadingRespostas(false);
       }
     },
     []
   );
 
-  async function mostrarDesempenhoParaAtividadeAplicada(atividade: Atividade) {
-    if (!turmaSelecionada) {
-      alert("Selecione uma turma primeiro.");
+  // abre o detalhe da resposta buscando a versão mais recente do servidor
+  async function abrirRespostaDetalhe(r: RespostaResumo) {
+    try {
+      // tentativa direta por id (algumas APIs não permitem GET /api/respostas/:id -> 405)
+      const res = await fetch(
+        `/api/respostas/${encodeURIComponent(String(r.idResposta))}`
+      );
+      if (res.status === 405) throw new Error("MethodNotAllowed");
+      const data = (await res.json().catch(() => null)) as unknown;
+      let latest: RespostaResumo = r;
+      if (res.ok && data && typeof data === "object") {
+        const maybe = data as Record<string, unknown>;
+        if (maybe.resposta && typeof maybe.resposta === "object") {
+          latest = maybe.resposta as RespostaResumo;
+        } else if ("idResposta" in maybe) {
+          latest = maybe as RespostaResumo;
+        }
+      }
+      setRespostaDetalhe(latest);
       return;
+    } catch (err: unknown) {
+      console.warn(
+        "abrirRespostaDetalhe: fetch by id failed, falling back:",
+        err
+      );
+      // fallback: buscar pela lista de respostas da atividade/turma e encontrar pelo id
+      try {
+        const atividadeId =
+          modalSelectedAtividadeId ?? atividadeDetalhe?.idAtividade ?? null;
+        const turmaQuery = turmaSelecionada
+          ? `&turmaId=${encodeURIComponent(String(turmaSelecionada.idTurma))}`
+          : "";
+        if (atividadeId) {
+          const listRes = await fetch(
+            `/api/respostas?atividadeId=${encodeURIComponent(
+              String(atividadeId)
+            )}${turmaQuery}`
+          );
+          const listData = (await listRes.json().catch(() => null)) as unknown;
+          let arr: unknown[] = [];
+          if (listRes.ok && Array.isArray(listData))
+            arr = listData as unknown[];
+          else if (
+            listRes.ok &&
+            listData &&
+            typeof listData === "object" &&
+            Array.isArray((listData as Record<string, unknown>).respostas)
+          )
+            arr = (listData as Record<string, unknown>).respostas as unknown[];
+          const found = arr.find(
+            (x) =>
+              Number((x as Record<string, unknown>).idResposta) ===
+              Number(r.idResposta)
+          );
+          if (found) {
+            setRespostaDetalhe(found as RespostaResumo);
+            return;
+          }
+        }
+      } catch (err2: unknown) {
+        const msg2 = err2 instanceof Error ? err2.message : String(err2);
+        console.error("abrirRespostaDetalhe fallback error:", msg2);
+      }
+      // último recurso: mostrar o objeto recebido inicialmente
+      setRespostaDetalhe(r);
     }
-    // keep inline expanded for context
-    setExpandedAtividadeId(atividade.idAtividade);
-    setAtividadeDetalhe(atividade);
-    // o componente DesempenhoAlunos fará as requisições necessárias
-    setModalDesempenhoAberto(true);
   }
 
-  function abrirRespostaDetalhe(r: RespostaResumo) {
-    setRespostaDetalhe(r);
-  }
   function fecharRespostaDetalhe() {
     setRespostaDetalhe(null);
   }
 
   // --- NOVO: correção inline (modal) ---
-  function abrirModalCorrecao(resposta: RespostaResumo) {
-    setRespostaParaCorrigir(resposta);
-    setNotaCorrecao(resposta.notaObtida ?? "");
-    setFeedbackCorrecao(resposta.feedback ?? "");
-    setCorrecaoModalAberto(true);
+  async function abrirModalCorrecao(resposta: RespostaResumo) {
+    setIsSubmittingCorrecao(false);
+    setCorrecaoModalAberto(false);
+    try {
+      // tenta fetch direto por id (algumas rotas podem devolver 405)
+      const res = await fetch(
+        `/api/respostas/${encodeURIComponent(String(resposta.idResposta))}`
+      );
+      if (res.status === 405 || !res.ok)
+        throw new Error("MethodNotAllowedOrNotOk");
+      const data = (await res.json().catch(() => null)) as unknown;
+      let latest: RespostaResumo = resposta;
+      if (data && typeof data === "object") {
+        const maybe = data as Record<string, unknown>;
+        if (maybe.resposta && typeof maybe.resposta === "object") {
+          latest = maybe.resposta as RespostaResumo;
+        } else if ("idResposta" in maybe) {
+          latest = maybe as RespostaResumo;
+        }
+      }
+      setRespostaParaCorrigir(latest);
+      setNotaCorrecao(latest.notaObtida ?? "");
+      setFeedbackCorrecao(latest.feedback ?? "");
+    } catch {
+      // fallback: buscar lista de respostas da atividade/turma e encontrar pelo id
+      try {
+        const atividadeId =
+          modalSelectedAtividadeId ?? atividadeDetalhe?.idAtividade ?? null;
+        const turmaQuery = turmaSelecionada
+          ? `&turmaId=${encodeURIComponent(String(turmaSelecionada.idTurma))}`
+          : "";
+        if (atividadeId) {
+          const listRes = await fetch(
+            `/api/respostas?atividadeId=${encodeURIComponent(
+              String(atividadeId)
+            )}${turmaQuery}`
+          );
+          const listData = (await listRes.json().catch(() => null)) as unknown;
+          let arr: unknown[] = [];
+          if (listRes.ok && Array.isArray(listData))
+            arr = listData as unknown[];
+          else if (
+            listRes.ok &&
+            listData &&
+            typeof listData === "object" &&
+            Array.isArray((listData as Record<string, unknown>).respostas)
+          )
+            arr = (listData as Record<string, unknown>).respostas as unknown[];
+          const found = arr.find(
+            (x) =>
+              Number((x as Record<string, unknown>).idResposta) ===
+              Number(resposta.idResposta)
+          );
+          if (found) {
+            const f = found as RespostaResumo;
+            setRespostaParaCorrigir(f);
+            setNotaCorrecao(f.notaObtida ?? "");
+            setFeedbackCorrecao(f.feedback ?? "");
+            setCorrecaoModalAberto(true);
+            // foco simples no campo de nota
+            setTimeout(() => {
+              const el = document.querySelector<HTMLInputElement>(
+                'input[type="number"]'
+              );
+              el?.focus();
+            }, 120);
+            return;
+          }
+        }
+      } catch (err2: unknown) {
+        const msg2 = err2 instanceof Error ? err2.message : String(err2);
+        console.warn("abrirModalCorrecao fallback failed:", msg2);
+      }
+      // fallback final: usa o objeto recebido
+      setRespostaParaCorrigir(resposta);
+      setNotaCorrecao(resposta.notaObtida ?? "");
+      setFeedbackCorrecao(resposta.feedback ?? "");
+    } finally {
+      // sempre abre o modal mesmo em fallback
+      setCorrecaoModalAberto(true);
+      setTimeout(() => {
+        const el = document.querySelector<HTMLInputElement>(
+          'input[type="number"]'
+        );
+        el?.focus();
+      }, 120);
+    }
   }
 
   async function enviarCorrecao() {
@@ -557,7 +827,7 @@ export default function PageProfessor() {
     }
     setIsSubmittingCorrecao(true);
     try {
-      const payload: any = {};
+      const payload: Record<string, unknown> = {};
       if (notaCorrecao !== "") payload.notaObtida = Number(notaCorrecao);
       payload.feedback = feedbackCorrecao ?? null;
 
@@ -571,37 +841,73 @@ export default function PageProfessor() {
           body: JSON.stringify(payload),
         }
       );
-      const data = await res.json().catch(() => null);
+      const data = (await res.json().catch(() => null)) as unknown;
       if (!res.ok) {
-        alert(data?.error || `Erro ao salvar correção (${res.status})`);
+        const errMsg =
+          data && typeof data === "object"
+            ? (data as Record<string, unknown>).error
+            : String(data);
+        alert(errMsg || `Erro ao salvar correção (${res.status})`);
         return;
       }
-      // Atualiza o estado local de respostas para refletir a correcao imediatamente
+      const updatedId = (data &&
+        (data as Record<string, unknown>).idResposta) as number | undefined;
+      const updatedNota = (data &&
+        (data as Record<string, unknown>).notaObtida) as number | undefined;
+      const updatedFeedback = (data &&
+        (data as Record<string, unknown>).feedback) as string | undefined;
+
+      // Atualiza o estado local de respostas para refletir a correção e feedback
       setRespostas((prev) =>
         prev.map((r) =>
-          r.idResposta === data.idResposta
-            ? { ...r, notaObtida: data.notaObtida, feedback: data.feedback }
+          r.idResposta === updatedId
+            ? {
+                ...r,
+                notaObtida: updatedNota ?? r.notaObtida,
+                feedback: updatedFeedback ?? r.feedback,
+              }
             : r
         )
       );
+      // atualiza o modal de correção e o detalhe caso estejam abertos para a mesma resposta
+      setRespostaParaCorrigir((prev) =>
+        prev && prev.idResposta === updatedId
+          ? {
+              ...prev,
+              notaObtida: updatedNota ?? prev.notaObtida,
+              feedback: updatedFeedback ?? prev.feedback,
+            }
+          : prev
+      );
+      setRespostaDetalhe((prev) =>
+        prev && prev.idResposta === updatedId
+          ? {
+              ...prev,
+              notaObtida: updatedNota ?? prev.notaObtida,
+              feedback: updatedFeedback ?? prev.feedback,
+            }
+          : prev
+      );
       alert("Correção salva com sucesso.");
       setCorrecaoModalAberto(false);
-      // opcional: atualizar lista de respostas recarregando do servidor:
+      // recarrega a lista de respostas para garantir consistência (opcional)
       if (atividadeDetalhe && turmaSelecionada) {
         await fetchRespostasParaAtividade(
           atividadeDetalhe.idAtividade,
           turmaSelecionada.idTurma
         );
       }
-    } catch (err) {
-      console.error("Erro enviarCorrecao:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro enviarCorrecao:", msg);
       alert("Erro ao enviar correção.");
     } finally {
       setIsSubmittingCorrecao(false);
     }
   }
 
-  function sairSistema() {
+  // prefixada com '_' pois a navegação de logout usa router diretamente no popup
+  function _sairSistema() {
     if (typeof window !== "undefined") {
       localStorage.removeItem("idProfessor");
       localStorage.removeItem("nomeProfessor");
@@ -613,6 +919,14 @@ export default function PageProfessor() {
   // ActivityItem: collapsible card rendered inline and centered width
   function ActivityItem({ atividade }: { atividade: Atividade }) {
     const isExpanded = expandedAtividadeId === atividade.idAtividade;
+
+    // detecta se estamos no contexto professor (estado existente no arquivo)
+    const isProfessor = typeof professorId === "number" && professorId != null;
+
+    // se há turma selecionada, verifica se a atividade já está aplicada nela
+    const alreadyApplied = turmaSelecionada
+      ? atividadesTurma.some((a) => a.idAtividade === atividade.idAtividade)
+      : false;
 
     const onToggle = (e?: React.MouseEvent) => {
       e?.stopPropagation();
@@ -662,7 +976,8 @@ export default function PageProfessor() {
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
-              {turmaSelecionada && (
+              {/* ocultar botões de aplicar quando o usuário for professor */}
+              {!isProfessor && turmaSelecionada && !alreadyApplied && (
                 <button
                   className={styles.btn}
                   onClick={(e) => {
@@ -674,32 +989,6 @@ export default function PageProfessor() {
                   Aplicar
                 </button>
               )}
-
-              <button
-                className={styles.btn}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  abrirModalAplicar(atividade);
-                }}
-                style={{ background: "#2196f3", color: "#fff" }}
-              >
-                Outras
-              </button>
-
-              <button
-                className={styles.btn}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!turmaSelecionada) {
-                    alert("Selecione uma turma primeiro.");
-                    return;
-                  }
-                  mostrarDesempenhoParaAtividadeAplicada(atividade);
-                }}
-                style={{ background: "#4caf50", color: "#fff" }}
-              >
-                Desempenho
-              </button>
             </div>
           </div>
 
@@ -721,7 +1010,58 @@ export default function PageProfessor() {
                     saveEndpoint="/api/respostas/plugged"
                     alunoId={studentId}
                     initialLoad={true}
+                    atividadeId={atividade.idAtividade}
+                    turmaId={turmaSelecionada?.idTurma ?? null}
                   />
+
+                  {/* ações para atividades PLUGGED */}
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* professor vê apenas Desempenho para PLUGGED; aplicar escondido para professor */}
+                    {isProfessor ? (
+                      <button
+                        className={styles.btn}
+                        onClick={() =>
+                          mostrarDesempenhoParaAtividadeAplicada(atividade)
+                        }
+                        style={{ background: "#6a5acd", color: "#fff" }}
+                      >
+                        Ver Desempenho
+                      </button>
+                    ) : (
+                      <>
+                        {turmaSelecionada && !alreadyApplied && (
+                          <button
+                            className={styles.btn}
+                            onClick={() => aplicarEmTurmaAtualQuick(atividade)}
+                            style={{ background: "#00bcd4", color: "#042027" }}
+                          >
+                            Aplicar nesta turma ({turmaSelecionada.nome})
+                          </button>
+                        )}
+                        {!alreadyApplied && (
+                          <button
+                            className={styles.btn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              abrirModalAplicar(atividade);
+                            }}
+                            style={{ background: "#2196f3", color: "#fff" }}
+                          >
+                            Aplicar em turmas
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <>
@@ -787,7 +1127,7 @@ export default function PageProfessor() {
                       alignItems: "center",
                     }}
                   >
-                    {turmaSelecionada && (
+                    {turmaSelecionada && !alreadyApplied && (
                       <button
                         className={styles.btn}
                         onClick={() => aplicarEmTurmaAtualQuick(atividade)}
@@ -796,37 +1136,29 @@ export default function PageProfessor() {
                         Aplicar nesta turma ({turmaSelecionada.nome})
                       </button>
                     )}
-                    <button
-                      className={styles.btn}
-                      onClick={() => abrirModalAplicar(atividade)}
-                      style={{ background: "#2196f3", color: "#fff" }}
-                    >
-                      Aplicar em outras turmas
-                    </button>
-                    <button
-                      className={styles.btn}
-                      onClick={() => {
-                        if (!turmaSelecionada) {
-                          alert("Selecione uma turma para ver desempenho.");
-                          return;
+
+                    {/* botão de desempenho — aparece somente quando estamos dentro de uma turma */}
+                    {turmaSelecionada && (
+                      <button
+                        className={styles.btn}
+                        onClick={() =>
+                          mostrarDesempenhoParaAtividadeAplicada(atividade)
                         }
-                        mostrarDesempenhoParaAtividadeAplicada(atividade);
-                      }}
-                      style={{ background: "#4caf50", color: "#fff" }}
-                    >
-                      Ver Desempenho
-                    </button>
-                    <button
-                      className={styles.btn}
-                      onClick={() =>
-                        router.push(
-                          `/professor/atividade/${atividade.idAtividade}`
-                        )
-                      }
-                      style={{ background: "#666", color: "#fff" }}
-                    >
-                      Abrir página
-                    </button>
+                        style={{ background: "#6a5acd", color: "#fff" }}
+                      >
+                        Ver Desempenho
+                      </button>
+                    )}
+
+                    {!alreadyApplied && (
+                      <button
+                        className={styles.btn}
+                        onClick={() => abrirModalAplicar(atividade)}
+                        style={{ background: "#2196f3", color: "#fff" }}
+                      >
+                        Aplicar em turmas
+                      </button>
+                    )}
 
                     <button
                       className={styles.btnVoltarModal}
@@ -863,15 +1195,20 @@ export default function PageProfessor() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        alert(data?.error || `Erro ao aplicar (${res.status})`);
+        const errMsg =
+          data && typeof data === "object"
+            ? (data as Record<string, unknown>).error
+            : String(data);
+        alert(errMsg || `Erro ao aplicar (${res.status})`);
         return;
       }
       alert(
         `Atividade "${atividade.titulo}" aplicada na turma "${turmaSelecionada.nome}"`
       );
       await fetchAtividadesTurma(turmaSelecionada.idTurma);
-    } catch (err) {
-      console.error("Erro aplicarNaTurmaAtual:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Erro aplicarNaTurmaAtual:", msg);
       alert("Erro ao aplicar atividade.");
     } finally {
       setIsApplying(false);
@@ -882,10 +1219,12 @@ export default function PageProfessor() {
     <div className={styles.paginaAlunoBody}>
       <aside className={styles.paginaAlunoAside}>
         <div className={styles.logoContainer}>
-          <img
+          <Image
             className={styles.logoImg}
             src="/images/Logopng.png"
             alt="Logo Codemind"
+            width={160}
+            height={48}
           />
         </div>
         <h2>Minhas Turmas</h2>
@@ -956,10 +1295,13 @@ export default function PageProfessor() {
               onClick={toggleUserPopup}
               style={{ cursor: "pointer" }}
             >
-              <img
+              <Image
                 className={styles.userAvatar}
                 src="https://www.gravatar.com/avatar/?d=mp"
                 alt="Avatar"
+                width={40}
+                height={40}
+                unoptimized
               />
               <div className={styles.userDetails}>
                 <span className={styles.userName}>{professorNome}</span>
@@ -1026,7 +1368,10 @@ export default function PageProfessor() {
         >
           {modalAplicarAberto && atividadeParaAplicar && (
             <div className={styles.modalContent}>
-              <h2>Aplicar "{atividadeParaAplicar.titulo}" em quais turmas?</h2>
+              <h2>
+                Aplicar &quot;{atividadeParaAplicar!.titulo}&quot; em quais
+                turmas?
+              </h2>
               {loadingTurmas ? (
                 <p>Carregando turmas...</p>
               ) : turmas.length === 0 ? (
@@ -1153,7 +1498,14 @@ export default function PageProfessor() {
                   type="text"
                   value={nomeTurma}
                   onChange={(e) => setNomeTurma(e.target.value)}
-                  style={{ width: "100%", padding: 8 }}
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    background: "#fff",
+                    color: "#000",
+                  }}
                 />
               </div>
 
@@ -1200,14 +1552,28 @@ export default function PageProfessor() {
                       placeholder="Nome"
                       value={formAluno.nome}
                       onChange={handleAlunoChange}
-                      style={{ flex: 1, padding: 8 }}
+                      style={{
+                        flex: 1,
+                        padding: 8,
+                        borderRadius: 6,
+                        border: "1px solid #ccc",
+                        background: "#fff",
+                        color: "#000",
+                      }}
                     />
                     <input
                       name="email"
                       placeholder="Email"
                       value={formAluno.email}
                       onChange={handleAlunoChange}
-                      style={{ flex: 1, padding: 8 }}
+                      style={{
+                        flex: 1,
+                        padding: 8,
+                        borderRadius: 6,
+                        border: "1px solid #ccc",
+                        background: "#fff",
+                        color: "#000",
+                      }}
                     />
                   </div>
                   <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -1216,14 +1582,28 @@ export default function PageProfessor() {
                       placeholder="Senha"
                       value={formAluno.senha}
                       onChange={handleAlunoChange}
-                      style={{ flex: 1, padding: 8 }}
+                      style={{
+                        flex: 1,
+                        padding: 8,
+                        borderRadius: 6,
+                        border: "1px solid #ccc",
+                        background: "#fff",
+                        color: "#000",
+                      }}
                     />
                     <input
                       name="confirmarSenha"
                       placeholder="Confirmar senha"
                       value={formAluno.confirmarSenha}
                       onChange={handleAlunoChange}
-                      style={{ flex: 1, padding: 8 }}
+                      style={{
+                        flex: 1,
+                        padding: 8,
+                        borderRadius: 6,
+                        border: "1px solid #ccc",
+                        background: "#fff",
+                        color: "#000",
+                      }}
                     />
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
@@ -1287,14 +1667,18 @@ export default function PageProfessor() {
           )}
         </div>
 
-        {/* restante dos modals (respostaDetalhe, correcao, desempenho) permanecem iguais (preservados) */}
         {respostaDetalhe && (
           <div
             className={`${styles.modal} ${styles.modalActive}`}
             role="dialog"
             aria-modal="true"
+            // garante que este modal fique sobre o modal de desempenho
+            style={{ zIndex: 11020 }}
           >
-            <div className={styles.modalContent}>
+            <div
+              className={styles.modalContent}
+              style={{ position: "relative", zIndex: 11021 }}
+            >
               <h3>
                 Resposta de{" "}
                 {respostaDetalhe.aluno?.nome ?? respostaDetalhe.idAluno}
@@ -1308,15 +1692,27 @@ export default function PageProfessor() {
               >
                 {respostaDetalhe.respostaTexto ?? "Sem texto enviado."}
               </div>
-              <div style={{ marginTop: 12 }}>
-                <button
-                  className={styles.btn}
-                  onClick={() => {
-                    /* opcional */
+
+              <div style={{ marginTop: 16 }}>
+                <strong>Feedback do professor</strong>
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "12px 16px",
+                    background: "#2b2638",
+                    borderRadius: 8,
+                    color: "#dcd7ee",
+                    minHeight: 48,
                   }}
                 >
-                  Ver histórico / dar feedback
-                </button>
+                  {respostaDetalhe.feedback &&
+                  respostaDetalhe.feedback.length > 0
+                    ? respostaDetalhe.feedback
+                    : "Nenhum feedback foi fornecido ainda."}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
                 <button
                   className={styles.btnVoltarModal}
                   onClick={fecharRespostaDetalhe}
@@ -1333,8 +1729,12 @@ export default function PageProfessor() {
             className={`${styles.modal} ${styles.modalActive}`}
             role="dialog"
             aria-modal="true"
+            style={{ zIndex: 11010 }}
           >
-            <div className={styles.modalContent}>
+            <div
+              className={styles.modalContent}
+              style={{ position: "relative", zIndex: 11011 }}
+            >
               <h3>
                 Corrigir resposta —{" "}
                 {respostaParaCorrigir.aluno?.nome ??
@@ -1355,7 +1755,15 @@ export default function PageProfessor() {
                       e.target.value === "" ? "" : Number(e.target.value)
                     )
                   }
-                  style={{ width: 120, padding: 8 }}
+                  style={{
+                    width: 120,
+                    padding: 8,
+                    background: "#fff",
+                    color: "#000",
+                    border: "1px solid #ccc",
+                    borderRadius: 6,
+                    outline: "none",
+                  }}
                 />
               </div>
               <div style={{ marginTop: 12 }}>
@@ -1366,7 +1774,16 @@ export default function PageProfessor() {
                   rows={6}
                   value={feedbackCorrecao}
                   onChange={(e) => setFeedbackCorrecao(e.target.value)}
-                  style={{ width: "100%", padding: 8 }}
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    background: "#fff",
+                    color: "#000",
+                    border: "1px solid #ccc",
+                    borderRadius: 6,
+                    outline: "none",
+                    resize: "vertical",
+                  }}
                 />
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -1385,17 +1802,6 @@ export default function PageProfessor() {
                 >
                   Cancelar
                 </button>
-                <button
-                  className={styles.btn}
-                  onClick={() =>
-                    router.push(
-                      `/professor/resposta/${respostaParaCorrigir.idResposta}`
-                    )
-                  }
-                  style={{ marginLeft: "auto" }}
-                >
-                  Abrir página de correção
-                </button>
               </div>
             </div>
           </div>
@@ -1405,24 +1811,113 @@ export default function PageProfessor() {
           className={`${styles.modal} ${
             modalDesempenhoAberto ? styles.modalActive : ""
           }`}
+          // desempenho fica atrás dos modais de resposta/correção
+          style={{ zIndex: 10000 }}
         >
           <div
             className={`${styles.modalContent} ${styles.desempenhoModalContent}`}
           >
-            <h2>Desempenho da Turma na Atividade</h2>
+            <h2>Desempenho da Turma</h2>
             <div style={{ marginTop: 12 }}>
               <strong>Turma:</strong> {turmaSelecionada?.nome ?? "—"}
             </div>
+
             <div style={{ marginTop: 12 }}>
               {turmaSelecionada ? (
-                <DesempenhoAlunos
-                  turmaId={turmaSelecionada.idTurma}
-                  atividadeId={atividadeDetalhe?.idAtividade ?? null}
-                />
+                <>
+                  {/* resumo da atividade */}
+                  {atividadeDetalhe ? (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {atividadeDetalhe.titulo}
+                      </div>
+                      <div
+                        style={{
+                          color: "#dcd7ee",
+                          marginTop: 6,
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {atividadeDetalhe.descricao ?? ""}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* modo unplugged: lista de respostas (segunda tela) */}
+                  {desempenhoView === "unplugged" ? (
+                    <>
+                      {loadingRespostas ? (
+                        <div>Carregando respostas...</div>
+                      ) : respostas.length === 0 ? (
+                        <div>
+                          Nenhuma resposta encontrada para esta atividade.
+                        </div>
+                      ) : (
+                        <div style={{ display: "grid", gap: 12 }}>
+                          {respostas.map((r) => (
+                            <div
+                              key={r.idResposta}
+                              style={{
+                                padding: 12,
+                                borderRadius: 8,
+                                background: "rgba(0,0,0,0.12)",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 700 }}>
+                                  {r.aluno?.nome ?? `Aluno ${r.idAluno}`}
+                                </div>
+                                <div style={{ color: "#cfcce0" }}>
+                                  {r.aluno?.email ?? ""}
+                                </div>
+                                <div style={{ marginTop: 6, color: "#dcd7ee" }}>
+                                  {r.respostaTexto ?? ""}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  className={styles.btn}
+                                  onClick={() => abrirRespostaDetalhe(r)}
+                                >
+                                  Ver Resposta
+                                </button>
+                                <button
+                                  className={styles.btn}
+                                  onClick={() => abrirModalCorrecao(r)}
+                                >
+                                  Corrigir
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : // modo plugged: componente existente
+                  modalSelectedAtividadeId ? (
+                    <DesempenhoAlunos
+                      turmaId={turmaSelecionada.idTurma}
+                      atividadeId={modalSelectedAtividadeId}
+                      dados={[]}
+                    />
+                  ) : atividadeDetalhe ? (
+                    <DesempenhoAlunos
+                      turmaId={turmaSelecionada.idTurma}
+                      atividadeId={atividadeDetalhe.idAtividade}
+                      dados={[]}
+                    />
+                  ) : (
+                    <p>Abra o desempenho a partir de uma atividade.</p>
+                  )}
+                </>
               ) : (
                 <p>Selecione uma turma para ver desempenho.</p>
               )}
             </div>
+
             <div
               style={{
                 marginTop: 16,
@@ -1432,7 +1927,10 @@ export default function PageProfessor() {
             >
               <button
                 className={styles.btnVoltarModal}
-                onClick={() => setModalDesempenhoAberto(false)}
+                onClick={() => {
+                  setModalDesempenhoAberto(false);
+                  setModalSelectedAtividadeId(null);
+                }}
               >
                 Fechar
               </button>
