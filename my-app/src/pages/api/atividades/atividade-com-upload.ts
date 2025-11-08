@@ -1,26 +1,46 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
+import cloudinary from "cloudinary";
 import crypto from "crypto";
 import prisma from "../../../lib/prisma";
 import type { Prisma, TipoAtividade } from "@prisma/client";
 
 export const config = { api: { bodyParser: false } };
 
-const uploadDir = path.join(process.cwd(), "public", "upload");
-fs.mkdirSync(uploadDir, { recursive: true });
+// use memory storage and upload directly to Cloudinary (no local filesystem)
+const storage = multer.memoryStorage();
 
-const storage = multer.diskStorage({
-  destination(_req, _file, cb) {
-    cb(null, uploadDir);
-  },
-  filename(_req, file, cb) {
-    const ext = path.extname(file.originalname) || "";
-    const name = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${ext}`;
-    cb(null, name);
-  },
-});
+// configure cloudinary from CLOUDINARY_URL or individual env vars
+try {
+  cloudinary.v2.config(
+    process.env.CLOUDINARY_URL
+      ? { cloudinary_url: process.env.CLOUDINARY_URL }
+      : ({
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key: process.env.CLOUDINARY_API_KEY,
+          api_secret: process.env.CLOUDINARY_API_SECRET,
+        } as any)
+  );
+} catch (e) {
+  // ignore - config will be validated at upload time
+}
+
+function uploadBufferToCloudinary(buffer: Buffer, originalName: string) {
+  return new Promise<any>((resolve, reject) => {
+    const publicId = `atividades/${Date.now()}-${crypto
+      .randomBytes(6)
+      .toString("hex")}`;
+    const stream = (cloudinary as any).v2.uploader.upload_stream(
+      { folder: "atividades", resource_type: "auto", public_id: publicId },
+      (error: any, result: any) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+}
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const allowedMimes = [
@@ -87,11 +107,6 @@ export default async function handler(
 
     const titulo = typeof tituloRaw === "string" ? tituloRaw.trim() : "";
     if (!titulo) {
-      // cleanup uploaded
-      for (const f of r.files ?? [])
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
       return res.status(400).json({ error: "titulo é obrigatório" });
     }
 
@@ -99,19 +114,11 @@ export default async function handler(
       typeof tipoRaw === "string" ? tipoRaw.trim().toUpperCase() : "";
     const allowedTipos = ["PLUGGED", "UNPLUGGED"];
     if (!allowedTipos.includes(tipo)) {
-      for (const f of r.files ?? [])
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
       return res.status(400).json({ error: "tipo inválido" });
     }
 
     const nota = Number(notaRaw);
     if (notaRaw === undefined || Number.isNaN(nota)) {
-      for (const f of r.files ?? [])
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
       return res
         .status(400)
         .json({ error: "nota é obrigatória e deve ser numérica" });
@@ -167,16 +174,13 @@ export default async function handler(
 
     const createdAtividade = await prisma.atividade.create({ data });
 
-    // handle files
+    // handle files (upload to Cloudinary)
     const files = r.files ?? [];
     const createdFiles: import("@prisma/client").AtividadeArquivo[] = [];
     const errors: { filename: string; message: string }[] = [];
 
     for (const f of files) {
       if (!allowedMimes.includes(f.mimetype)) {
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
         errors.push({
           filename: f.originalname,
           message: "Tipo de arquivo não permitido",
@@ -184,9 +188,6 @@ export default async function handler(
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
         errors.push({
           filename: f.originalname,
           message: "Arquivo muito grande",
@@ -194,26 +195,28 @@ export default async function handler(
         continue;
       }
 
-      const fileUrl = `/upload/${path.basename(f.filename)}`;
       try {
+        const buf = (f as any).buffer as Buffer;
+        if (!buf) throw new Error("No buffer available for file");
+        const uploadRes = await uploadBufferToCloudinary(buf, f.originalname);
+        const secureUrl = uploadRes?.secure_url ?? uploadRes?.url;
+        if (!secureUrl) throw new Error("No URL returned from Cloudinary");
+
         const rec = await prisma.atividadeArquivo.create({
           data: {
-            url: fileUrl,
+            url: secureUrl,
             tipoArquivo: f.mimetype,
             atividadeId: createdAtividade.idAtividade,
           },
         });
         createdFiles.push(rec);
-      } catch (dbErr: unknown) {
-        const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-        console.error("Erro ao gravar arquivo no DB:", msg);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("Erro ao processar/upload arquivo:", msg);
         errors.push({
           filename: f.originalname,
-          message: "Erro ao salvar no banco",
+          message: "Erro ao salvar no banco ou upload",
         });
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
       }
     }
 

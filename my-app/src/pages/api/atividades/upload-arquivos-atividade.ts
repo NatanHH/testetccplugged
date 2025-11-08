@@ -6,7 +6,7 @@ import type {
 } from "express";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
+import cloudinary from "cloudinary";
 import crypto from "crypto";
 import prisma from "../../../lib/prisma";
 import type { AtividadeArquivo } from "@prisma/client";
@@ -17,19 +17,39 @@ export const config = {
   },
 };
 
-const uploadDir = path.join(process.cwd(), "public", "upload");
-fs.mkdirSync(uploadDir, { recursive: true });
+// use memory storage and upload directly to Cloudinary
+const storage = multer.memoryStorage();
 
-const storage = multer.diskStorage({
-  destination(_req, _file, cb) {
-    cb(null, uploadDir);
-  },
-  filename(_req, file, cb) {
-    const ext = path.extname(file.originalname) || "";
-    const name = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${ext}`;
-    cb(null, name);
-  },
-});
+// configure cloudinary from CLOUDINARY_URL or individual env vars
+try {
+  cloudinary.v2.config(
+    process.env.CLOUDINARY_URL
+      ? { cloudinary_url: process.env.CLOUDINARY_URL }
+      : ({
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key: process.env.CLOUDINARY_API_KEY,
+          api_secret: process.env.CLOUDINARY_API_SECRET,
+        } as any)
+  );
+} catch (e) {
+  // ignore - will throw at upload time if misconfigured
+}
+
+function uploadBufferToCloudinary(buffer: Buffer) {
+  return new Promise<any>((resolve, reject) => {
+    const publicId = `atividades/${Date.now()}-${crypto
+      .randomBytes(6)
+      .toString("hex")}`;
+    const stream = (cloudinary as any).v2.uploader.upload_stream(
+      { folder: "atividades", resource_type: "auto", public_id: publicId },
+      (error: any, result: any) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+}
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const allowedMimes = [
@@ -101,12 +121,6 @@ export default async function handler(
     const atividadeId =
       atividadeIdRaw !== undefined ? Number(atividadeIdRaw) : NaN;
     if (!atividadeId || Number.isNaN(atividadeId)) {
-      // cleanup any uploaded files
-      for (const f of r.files ?? []) {
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
-      }
       return res
         .status(400)
         .json({ error: "atividadeId é obrigatório e deve ser numérico" });
@@ -123,19 +137,11 @@ export default async function handler(
       where: { idAtividade: atividadeId },
     });
     if (!atividadeExists) {
-      for (const f of files) {
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {}
-      }
       return res.status(400).json({ error: "Atividade não encontrada" });
     }
 
     for (const f of files) {
       if (!allowedMimes.includes(f.mimetype)) {
-        try {
-          fs.unlinkSync(f.path);
-        } catch {}
         errors.push({
           filename: f.originalname,
           message: "Tipo de arquivo não permitido",
@@ -143,9 +149,6 @@ export default async function handler(
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        try {
-          fs.unlinkSync(f.path);
-        } catch {}
         errors.push({
           filename: f.originalname,
           message: "Arquivo excede o tamanho máximo (5MB)",
@@ -153,22 +156,28 @@ export default async function handler(
         continue;
       }
 
-      const fileUrl = `/upload/${path.basename(f.filename)}`;
       try {
+        const buf = (f as any).buffer as Buffer;
+        if (!buf) throw new Error("No buffer available for file");
+        const uploadRes = await uploadBufferToCloudinary(buf);
+        const secureUrl = uploadRes?.secure_url ?? uploadRes?.url;
+        if (!secureUrl) throw new Error("No URL returned from Cloudinary");
+
         const record = await prisma.atividadeArquivo.create({
-          data: { url: fileUrl, tipoArquivo: f.mimetype, atividadeId },
+          data: { url: secureUrl, tipoArquivo: f.mimetype, atividadeId },
         });
         created.push(record);
       } catch (dbErr: unknown) {
         const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-        console.error("Erro ao gravar DB para arquivo:", f.originalname, msg);
+        console.error(
+          "Erro ao gravar DB/Upload para arquivo:",
+          f.originalname,
+          msg
+        );
         errors.push({
           filename: f.originalname,
-          message: "Erro ao salvar no banco",
+          message: "Erro ao salvar no banco ou upload",
         });
-        try {
-          fs.unlinkSync(f.path);
-        } catch {}
       }
     }
 
