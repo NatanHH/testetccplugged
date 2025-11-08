@@ -1118,17 +1118,31 @@ export default function PageProfessor() {
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* professor vê apenas Desempenho para PLUGGED; aplicar escondido para professor */}
+                    {/* ✅ MODIFICADO: Se não tem turma selecionada, mostra "Aplicar em Turma" */}
+                    {/* Se tem turma selecionada, mostra "Ver Desempenho" */}
                     {isProfessor ? (
-                      <button
-                        className={styles.btn}
-                        onClick={() =>
-                          mostrarDesempenhoParaAtividadeAplicada(atividade)
-                        }
-                        style={{ background: "#6a5acd", color: "#fff" }}
-                      >
-                        Ver Desempenho
-                      </button>
+                      turmaSelecionada ? (
+                        <button
+                          className={styles.btn}
+                          onClick={() =>
+                            mostrarDesempenhoParaAtividadeAplicada(atividade)
+                          }
+                          style={{ background: "#6a5acd", color: "#fff" }}
+                        >
+                          Ver Desempenho
+                        </button>
+                      ) : (
+                        <button
+                          className={styles.btn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            abrirModalAplicar(atividade);
+                          }}
+                          style={{ background: "#2196f3", color: "#fff" }}
+                        >
+                          Aplicar em Turma
+                        </button>
+                      )
                     ) : (
                       <>
                         {turmaSelecionada && !alreadyApplied && (

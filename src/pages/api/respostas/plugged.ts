@@ -88,7 +88,21 @@ async function pluggedHandler(req: NextApiRequest, res: NextApiResponse) {
     const correta = selectedValue === correctValue;
     const notaObtida = correta ? 10 : 0;
 
-    // grava apenas dados essenciais
+    // ✅ VALIDAÇÃO: Professor pode testar mas não salva no banco
+    // Se não tem idAluno, é modo teste (professor testando)
+    if (!idAluno) {
+      return res.status(200).json({
+        ok: true,
+        id: null,
+        correta,
+        correctValue,
+        notaObtida,
+        testMode: true,
+        message: "Modo teste - resposta não foi salva",
+      });
+    }
+
+    // grava apenas dados essenciais (somente para alunos)
     const saved = await prisma.realizacaoPlugged.create({
       data: {
         idAtividade,

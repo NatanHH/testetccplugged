@@ -70,6 +70,9 @@ export default function PluggedContagemMCQ({
   >(null);
   const [loadingAtividades, setLoadingAtividades] = useState(false);
 
+  // ✅ Estado para indicar modo teste (professor testando sem salvar)
+  const [isTestMode, setIsTestMode] = useState<boolean>(false);
+
   // ✅ OTIMIZAÇÃO: Cache de instâncias para reduzir latência
   const [instanceCache, setInstanceCache] = useState<InstancePayload[]>([]);
 
@@ -183,6 +186,15 @@ export default function PluggedContagemMCQ({
 
       // show result briefly then generate a new instance automatically
       setAnswered(true);
+
+      // ✅ Detectar modo teste
+      const testMode = !!(
+        j &&
+        typeof j === "object" &&
+        (j as Record<string, unknown>).testMode === true
+      );
+      setIsTestMode(testMode);
+
       setScore(
         j && typeof j === "object" && (j as Record<string, unknown>).correta
           ? 1
@@ -549,6 +561,22 @@ export default function PluggedContagemMCQ({
             }}
           >
             {score === 1 ? "Correto ✓" : "Incorreto ✕"}
+            {/* ✅ Indicador de modo teste */}
+            {isTestMode && (
+              <span
+                style={{
+                  marginLeft: 12,
+                  fontSize: "0.85em",
+                  color: "#ff9800",
+                  backgroundColor: "rgba(255, 152, 0, 0.1)",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  border: "1px solid #ff9800",
+                }}
+              >
+                (Modo Teste - Não Salvo)
+              </span>
+            )}
           </div>
         )}
 
