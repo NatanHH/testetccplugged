@@ -172,6 +172,37 @@ export default function Page(): JSX.Element {
   useEffect(() => {
     const idFromStore =
       typeof window !== "undefined" ? localStorage.getItem("idAluno") : null;
+    // If the login flow preloaded activities/turmas into localStorage, use them immediately
+    let initialTurmaIdsFromStorage: number[] | null = null;
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("initialAtividades");
+        if (raw) {
+          const parsed = JSON.parse(raw) as AtividadeResumo[] | null;
+          if (Array.isArray(parsed)) {
+            setAtividades(parsed);
+          }
+          localStorage.removeItem("initialAtividades");
+        }
+        const rawTurmas = localStorage.getItem("initialTurmas");
+        if (rawTurmas) {
+          const parsedT = JSON.parse(rawTurmas) as
+            | { idTurma?: number }[]
+            | null;
+          if (Array.isArray(parsedT)) {
+            const ids = parsedT
+              .map((t) =>
+                t && typeof t.idTurma === "number" ? t.idTurma : null
+              )
+              .filter((n): n is number => n !== null);
+            if (ids.length) initialTurmaIdsFromStorage = ids;
+          }
+          localStorage.removeItem("initialTurmas");
+        }
+      } catch {
+        /* ignore malformed cache */
+      }
+    }
     const effectiveId = alunoId ?? (idFromStore ? Number(idFromStore) : null);
 
     if (!effectiveId) {
@@ -183,6 +214,9 @@ export default function Page(): JSX.Element {
 
     // Try to discover which turma(s) the aluno belongs to so we can filter atividades
     async function discoverAlunoTurmaIds(): Promise<number[] | null> {
+      // If we preloaded turma ids at login, use them first for immediate filtering.
+      if (initialTurmaIdsFromStorage && initialTurmaIdsFromStorage.length > 0)
+        return initialTurmaIdsFromStorage;
       try {
         // Primary: ask the turmas endpoint for turmas that include this aluno
         const r = await fetch(

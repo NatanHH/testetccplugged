@@ -1,6 +1,19 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import bcrypt from "bcryptjs";
 import prisma from "../../../lib/prisma";
+import type {
+  AtividadeTurma,
+  Atividade as PrismaAtividade,
+  AtividadeArquivo,
+  Turma,
+  Professor,
+} from "@prisma/client";
+
+type AplicacaoWithIncludes = AtividadeTurma & {
+  atividade: PrismaAtividade & { arquivos: AtividadeArquivo[] };
+  turma: Turma | null;
+  professor: Professor | null;
+};
 
 export default async function handler(
   req: NextApiRequest,
@@ -74,11 +87,83 @@ export default async function handler(
       return res.status(401).json({ error: "Email ou senha incorretos" });
     }
 
+    // On successful login, also return the student's turmas and atividades applied
+    // so the client can render them immediately after login.
+    // Discover turma ids
+    const turmaLinks = await prisma.turmaAluno.findMany({
+      where: { idAluno: aluno.idAluno },
+      include: { turma: true },
+    });
+    const turmaIds = turmaLinks.map((t) => t.idTurma);
+
+    // Find applications (atividadeTurma) for these turmas (fallback to nested lookup)
+    let aplicacoes: AplicacaoWithIncludes[] = [];
+    if (turmaIds.length > 0) {
+      aplicacoes = await prisma.atividadeTurma.findMany({
+        where: { idTurma: { in: turmaIds } },
+        include: {
+          atividade: { include: { arquivos: true } },
+          turma: true,
+          professor: true,
+        },
+        orderBy: { dataAplicacao: "desc" },
+      });
+    } else {
+      aplicacoes = await prisma.atividadeTurma.findMany({
+        where: {
+          turma: { alunos: { some: { idAluno: aluno.idAluno } } },
+        },
+        include: {
+          atividade: { include: { arquivos: true } },
+          turma: true,
+          professor: true,
+        },
+        orderBy: { dataAplicacao: "desc" },
+      });
+    }
+
+    // Filter aplicações to those applied by the turma's professor (same logic as listaratividades)
+    const aplicFiltered = aplicacoes.filter((ap) => {
+      if (!ap.turma) return false;
+      const turmaProfessorId = ap.turma.professorId;
+      const aplicadorId = ap.idProfessor ?? ap.professor?.idProfessor ?? null;
+      if (aplicadorId === null || aplicadorId === undefined) return false;
+      return turmaProfessorId === aplicadorId;
+    });
+
+    const atividades = aplicFiltered.map((ap) => {
+      const at = ap.atividade;
+      return {
+        idAtividade: at.idAtividade,
+        titulo: at.titulo,
+        descricao: at.descricao ?? null,
+        tipo: at.tipo,
+        nota: at.nota ?? null,
+        dataAplicacao: ap.dataAplicacao ? ap.dataAplicacao.toISOString() : null,
+        turma: ap.turma
+          ? { idTurma: ap.turma.idTurma, nome: ap.turma.nome }
+          : null,
+        arquivos: (at.arquivos || []).map((f: AtividadeArquivo) => ({
+          idArquivo: f.idArquivo,
+          url: f.url,
+          tipoArquivo: f.tipoArquivo ?? null,
+          nomeArquivo: null,
+        })),
+      };
+    });
+
+    const turmas = turmaLinks.map((t) => ({
+      idTurma: t.idTurma,
+      nome: t.turma?.nome ?? "",
+    }));
+
     return res.status(200).json({
       success: true,
       idAluno: aluno.idAluno,
       nome: aluno.nome,
       email: aluno.email,
+      turmas,
+      atividades,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

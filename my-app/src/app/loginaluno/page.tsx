@@ -18,6 +18,30 @@ export default function LoginAluno() {
         body: JSON.stringify({ email, senha }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => null);
+        try {
+          if (data && typeof window !== "undefined") {
+            if (data.idAluno)
+              localStorage.setItem("idAluno", String(data.idAluno));
+            if (data.nome) localStorage.setItem("alunoNome", String(data.nome));
+            if (data.email)
+              localStorage.setItem("alunoEmail", String(data.email));
+            if (data.turmas)
+              localStorage.setItem(
+                "initialTurmas",
+                JSON.stringify(data.turmas)
+              );
+            if (data.atividades)
+              localStorage.setItem(
+                "initialAtividades",
+                JSON.stringify(data.atividades)
+              );
+            // signal other tabs/components
+            window.dispatchEvent(new Event("alunoUpdate"));
+          }
+        } catch {
+          /* ignore storage errors */
+        }
         router.push("/pginialuno");
       } else {
         console.error("Login falhou");
