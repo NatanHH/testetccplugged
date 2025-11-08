@@ -1,18 +1,25 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../lib/prisma";
-import type {
-  AtividadeTurma,
-  Atividade as PrismaAtividade,
-  AtividadeArquivo,
-  Turma,
-  Professor,
-} from "@prisma/client";
+import type { AtividadeArquivo } from "@prisma/client";
 
-// Narrowed shape for atividadeTurma when `include` is used in queries below.
-type AplicacaoWithIncludes = AtividadeTurma & {
-  atividade: PrismaAtividade & { arquivos: AtividadeArquivo[] };
-  turma: Turma | null;
-  professor: Professor | null;
+// (removed unused narrowed type to satisfy lint rules)
+
+type TurmaResumo = { idTurma: number; nome: string };
+type ArquivoResumo = {
+  idArquivo: number;
+  url: string;
+  tipoArquivo: string | null;
+  nomeArquivo: string | null;
+};
+type ResumoAtividade = {
+  idAtividade: number;
+  titulo: string;
+  descricao: string | null;
+  tipo: string;
+  nota: number | null;
+  dataAplicacao: string | null;
+  turmas: TurmaResumo[];
+  arquivos: ArquivoResumo[];
 };
 
 export default async function handler(
@@ -82,12 +89,12 @@ export default async function handler(
 
       // map atividadeTurma rows into grouped atividades keyed by atividade id to
       // deduplicate when the same atividade is applied to multiple turmas
-      const grouped = new Map<number, any>();
+      const grouped = new Map<number, ResumoAtividade>();
       for (const ap of aplicacoes) {
         const at = ap.atividade;
         if (!at) continue;
         const existing = grouped.get(at.idAtividade);
-        const resumo = {
+        const resumo: ResumoAtividade = {
           idAtividade: at.idAtividade,
           titulo: at.titulo,
           descricao: at.descricao ?? null,
@@ -109,10 +116,7 @@ export default async function handler(
         if (!existing) grouped.set(at.idAtividade, resumo);
         else {
           // merge turma info
-          const existingTurmas = existing.turmas as {
-            idTurma: number;
-            nome: string;
-          }[];
+          const existingTurmas = existing.turmas as TurmaResumo[];
           const newTurma = ap.turma
             ? { idTurma: ap.turma.idTurma, nome: ap.turma.nome }
             : null;
@@ -127,16 +131,18 @@ export default async function handler(
         }
       }
 
-      const resultados = Array.from(grouped.values()).map((r) => ({
-        idAtividade: r.idAtividade,
-        titulo: r.titulo,
-        descricao: r.descricao,
-        tipo: r.tipo,
-        nota: r.nota,
-        dataAplicacao: r.dataAplicacao,
-        turma: r.turmas && r.turmas.length ? r.turmas[0] : null,
-        arquivos: r.arquivos,
-      }));
+      const resultados = Array.from(grouped.values()).map(
+        (r: ResumoAtividade) => ({
+          idAtividade: r.idAtividade,
+          titulo: r.titulo,
+          descricao: r.descricao,
+          tipo: r.tipo,
+          nota: r.nota,
+          dataAplicacao: r.dataAplicacao,
+          turma: r.turmas && r.turmas.length ? r.turmas[0] : null,
+          arquivos: r.arquivos,
+        })
+      );
 
       try {
         console.debug(

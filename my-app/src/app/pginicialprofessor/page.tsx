@@ -230,8 +230,7 @@ export default function PageProfessor() {
     const email = localStorage.getItem("emailProfessor");
 
     // expose for later use inside this effect's scope — attach to window for debug if needed
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).openAlunoDetalhes = openAlunoDetalhes;
+    window.openAlunoDetalhes = openAlunoDetalhes;
 
     if (id) setProfessorId(Number(id));
     if (nome) setProfessorNome(nome);
