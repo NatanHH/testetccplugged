@@ -24,8 +24,32 @@ export const config = {
 const storage = multer.memoryStorage();
 
 // configure cloudinary from CLOUDINARY_URL or individual env vars
+function tryParseCloudinaryUrl(raw: string | undefined) {
+  if (!raw || typeof raw !== "string") return null;
+  const m = raw.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+  if (!m) return null;
+  return { api_key: m[1], api_secret: m[2], cloud_name: m[3] };
+}
+
 try {
-  if (process.env.CLOUDINARY_URL) {
+  // allow users to accidentally paste the full cloudinary://... value into
+  // any of the three separate vars in Vercel. We detect and parse it.
+  let parsed = tryParseCloudinaryUrl(process.env.CLOUDINARY_URL ?? undefined);
+  if (!parsed) {
+    // check common mis-paste locations
+    parsed =
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_API_KEY ?? undefined) ||
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_API_SECRET ?? undefined) ||
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_CLOUD_NAME ?? undefined);
+  }
+
+  if (parsed) {
+    cloudinaryV2.config({
+      cloud_name: parsed.cloud_name,
+      api_key: parsed.api_key,
+      api_secret: parsed.api_secret,
+    });
+  } else if (process.env.CLOUDINARY_URL) {
     cloudinaryV2.config({ cloudinary_url: process.env.CLOUDINARY_URL });
   } else {
     cloudinaryV2.config({
@@ -34,9 +58,19 @@ try {
       api_secret: process.env.CLOUDINARY_API_SECRET,
     });
   }
-} catch {
-  // ignore - will throw at upload time if misconfigured
+} catch (e) {
+  // log config-time issues; actual upload errors will still be caught later
+  console.error("Cloudinary config error:", e);
 }
+
+// DEBUG: log presence of Cloudinary environment variables (no secrets are printed)
+// Also show whether we parsed a full URL from a mis-pasted value.
+console.log("Cloudinary env presence:", {
+  CLOUDINARY_URL: !!process.env.CLOUDINARY_URL,
+  CLOUDINARY_CLOUD_NAME: !!process.env.CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY: !!process.env.CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET: !!process.env.CLOUDINARY_API_SECRET,
+});
 
 function uploadBufferToCloudinary(buffer: Buffer): Promise<UploadApiResponse> {
   return new Promise<UploadApiResponse>((resolve, reject) => {

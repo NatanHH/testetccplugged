@@ -15,8 +15,29 @@ export const config = { api: { bodyParser: false } };
 const storage = multer.memoryStorage();
 
 // configure cloudinary from CLOUDINARY_URL or individual env vars
+function tryParseCloudinaryUrl(raw: string | undefined) {
+  if (!raw || typeof raw !== "string") return null;
+  const m = raw.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+  if (!m) return null;
+  return { api_key: m[1], api_secret: m[2], cloud_name: m[3] };
+}
+
 try {
-  if (process.env.CLOUDINARY_URL) {
+  let parsed = tryParseCloudinaryUrl(process.env.CLOUDINARY_URL ?? undefined);
+  if (!parsed) {
+    parsed =
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_API_KEY ?? undefined) ||
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_API_SECRET ?? undefined) ||
+      tryParseCloudinaryUrl(process.env.CLOUDINARY_CLOUD_NAME ?? undefined);
+  }
+
+  if (parsed) {
+    cloudinaryV2.config({
+      cloud_name: parsed.cloud_name,
+      api_key: parsed.api_key,
+      api_secret: parsed.api_secret,
+    });
+  } else if (process.env.CLOUDINARY_URL) {
     cloudinaryV2.config({ cloudinary_url: process.env.CLOUDINARY_URL });
   } else {
     cloudinaryV2.config({
@@ -25,9 +46,17 @@ try {
       api_secret: process.env.CLOUDINARY_API_SECRET,
     });
   }
-} catch {
-  // ignore - config will be validated at upload time
+} catch (e) {
+  console.error("Cloudinary config error:", e);
 }
+
+// DEBUG: log presence of Cloudinary environment variables (no secrets are printed)
+console.log("Cloudinary env presence:", {
+  CLOUDINARY_URL: !!process.env.CLOUDINARY_URL,
+  CLOUDINARY_CLOUD_NAME: !!process.env.CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY: !!process.env.CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET: !!process.env.CLOUDINARY_API_SECRET,
+});
 
 function uploadBufferToCloudinary(
   buffer: Buffer,
