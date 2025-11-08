@@ -7,6 +7,20 @@ export default async function handler(
 ) {
   if (req.method === "GET") {
     // exemplo: listar alunos
+    const { id, idAluno } = req.query;
+    if (id !== undefined || idAluno !== undefined) {
+      const target = Number(String(id ?? idAluno));
+      if (Number.isNaN(target))
+        return res.status(400).json({ error: "id inválido" });
+      const aluno = await prisma.aluno.findUnique({
+        where: { idAluno: target },
+        select: { idAluno: true, nome: true, email: true },
+      });
+      if (!aluno)
+        return res.status(404).json({ error: "Aluno não encontrado" });
+      return res.status(200).json(aluno);
+    }
+
     const alunos = await prisma.aluno.findMany();
     return res.status(200).json(alunos);
   }
