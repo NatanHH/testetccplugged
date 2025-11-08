@@ -74,6 +74,17 @@ export default async function handler(
         });
       }
 
+      // Filter aplicações to only those applied by the turma's assigned professor.
+      // This makes the student view match the professor's view for a turma:
+      // only activities that were applied by that turma's professor are shown.
+      aplicacoes = aplicacoes.filter((ap) => {
+        if (!ap.turma) return false;
+        const turmaProfessorId = (ap.turma as Turma).professorId;
+        const aplicadorId = ap.idProfessor ?? ap.professor?.idProfessor ?? null;
+        if (aplicadorId === null || aplicadorId === undefined) return false;
+        return turmaProfessorId === aplicadorId;
+      });
+
       // map to atividade summary shape expected by the client
       const resultados = aplicacoes.map((ap: AplicacaoWithIncludes) => {
         const at = ap.atividade;
