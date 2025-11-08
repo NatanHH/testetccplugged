@@ -1314,7 +1314,7 @@ export default function PageProfessor() {
         <div className={styles.logoContainer}>
           <Image
             className={styles.logoImg}
-            src="/images/logopng.png"
+            src="/images/Logopng.png"
             alt="Logo Codemind"
             width={160}
             height={48}

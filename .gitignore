@@ -1,2 +1,6 @@
 .vscode/
 .vercel
+
+# ignore installed node modules and lockfiles created at repo root
+node_modules/
+package-lock.json
