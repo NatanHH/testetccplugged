@@ -18,20 +18,36 @@ export default async function handler(
   try {
     const emailNorm = email.trim().toLowerCase();
 
+    // DEBUG: log which email forms we're trying (no passwords)
+    console.log("[loginaluno] trying login for", {
+      emailRaw: email,
+      emailNorm,
+    });
+
     // try case-normalized lookup first
     let aluno = await prisma.aluno.findUnique({ where: { email: emailNorm } });
     if (!aluno) {
+      console.log("[loginaluno] normalized lookup failed, trying fallbacks");
       // fallback: try case-sensitive/other lookups
       aluno =
         (await prisma.aluno.findFirst({ where: { email } })) ??
         (await prisma.aluno.findFirst({ where: { nome: email } }));
+      console.log("[loginaluno] fallback result:", {
+        found: !!aluno,
+        id: aluno?.idAluno ?? null,
+      });
     }
 
     if (!aluno) {
       return res.status(401).json({ error: "Email ou senha incorretos" });
     }
-
     const stored = aluno.senha as string | null;
+    console.log(
+      "[loginaluno] aluno found, id:",
+      aluno.idAluno,
+      "stored password type:",
+      typeof stored
+    );
     let passwordMatches = false;
     if (typeof stored === "string") {
       try {
