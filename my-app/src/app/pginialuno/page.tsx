@@ -354,37 +354,68 @@ export default function Page(): JSX.Element {
       ) {
         // Prefer explicit aluno endpoint to fetch this student's profile when we have an id
         try {
-          let body: any = null;
+          let body: Record<string, unknown> | null = null;
           if (alunoId) {
             const r = await fetch(
               `/api/alunos/aluno?id=${encodeURIComponent(String(alunoId))}`
             );
-            if (r.ok) body = await r.json().catch(() => null);
+            if (r.ok)
+              body = (await r.json().catch(() => null)) as Record<
+                string,
+                unknown
+              > | null;
           }
 
           // fallback to older endpoint shape if present
           if (!body) {
             try {
               const res = await fetch("/api/aluno/me");
-              if (res.ok) body = await res.json().catch(() => null);
+              if (res.ok)
+                body = (await res.json().catch(() => null)) as Record<
+                  string,
+                  unknown
+                > | null;
             } catch {
               /* ignore */
             }
           }
 
           if (body) {
-            if (!alunoNome || alunoNome.length === 0)
-              setAlunoNome(body.nome ?? body.name ?? "");
-            if (!alunoEmail || alunoEmail.length === 0)
-              setAlunoEmail(body.email ?? "");
+            const nomeVal =
+              typeof body === "object" &&
+              body !== null &&
+              typeof body["nome"] === "string"
+                ? (body["nome"] as string)
+                : typeof body === "object" &&
+                  body !== null &&
+                  typeof body["name"] === "string"
+                ? (body["name"] as string)
+                : "";
+            const emailVal =
+              typeof body === "object" &&
+              body !== null &&
+              typeof body["email"] === "string"
+                ? (body["email"] as string)
+                : "";
+            const idVal =
+              typeof body === "object" &&
+              body !== null &&
+              (typeof body["idAluno"] === "number" ||
+                typeof body["idAluno"] === "string")
+                ? String(body["idAluno"])
+                : undefined;
+
+            if (!alunoNome || alunoNome.length === 0) setAlunoNome(nomeVal);
+            if (!alunoEmail || alunoEmail.length === 0) setAlunoEmail(emailVal);
             try {
               if (typeof window !== "undefined") {
-                if (body.nome) localStorage.setItem("alunoNome", body.nome);
-                if (body.email) localStorage.setItem("alunoEmail", body.email);
-                if (body.idAluno)
-                  localStorage.setItem("idAluno", String(body.idAluno));
+                if (nomeVal) localStorage.setItem("alunoNome", nomeVal);
+                if (emailVal) localStorage.setItem("alunoEmail", emailVal);
+                if (idVal) localStorage.setItem("idAluno", idVal);
               }
-            } catch {}
+            } catch {
+              /* ignore storage errors */
+            }
           }
         } catch {
           // ignore errors; endpoint might not exist
