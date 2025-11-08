@@ -681,10 +681,8 @@ export default function Page(): JSX.Element {
             height={48}
           />
         </div>
-        <h2>Minhas Atividades</h2>
-        <p style={{ color: "#bdbdda", fontSize: "0.9em", marginTop: 8 }}>
-          Atividades das minhas turmas
-        </p>
+
+        <p style={{ color: "#bdbdda", fontSize: "0.9em", marginTop: 8 }}></p>
       </aside>
 
       <main className={styles.paginaAlunoMain}>
