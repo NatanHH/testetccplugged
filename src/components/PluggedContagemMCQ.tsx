@@ -65,10 +65,6 @@ export default function PluggedContagemMCQ({
   const [derivedAtividadeId, setDerivedAtividadeId] = useState<number | null>(
     null
   );
-  const [availableAtividades, setAvailableAtividades] = useState<
-    { idAtividade: number; titulo: string }[] | null
-  >(null);
-  const [loadingAtividades, setLoadingAtividades] = useState(false);
 
   // ✅ Estado para indicar modo teste (professor testando sem salvar)
   const [isTestMode, setIsTestMode] = useState<boolean>(false);
@@ -232,49 +228,6 @@ export default function PluggedContagemMCQ({
     }
   }
 
-  useEffect(() => {
-    // se não temos atividadeId nem conseguimos derivar, carregue lista para seleção manual
-    if ((atividadeId ?? derivedAtividadeId) == null) {
-      setLoadingAtividades(true);
-      void fetch("/api/atividades")
-        .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-        .then((j: unknown) => {
-          // adapte ao shape real do seu endpoint; aqui assumimos array { idAtividade, titulo }
-          if (Array.isArray(j)) {
-            setAvailableAtividades(
-              j as { idAtividade: number; titulo: string }[]
-            );
-          } else if (
-            j &&
-            typeof j === "object" &&
-            Array.isArray((j as Record<string, unknown>).atividades)
-          ) {
-            setAvailableAtividades(
-              (j as Record<string, unknown>).atividades as {
-                idAtividade: number;
-                titulo: string;
-              }[]
-            );
-          } else {
-            setAvailableAtividades([]);
-          }
-        })
-        .catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.warn("failed to load atividades list:", msg);
-          setAvailableAtividades([]);
-        })
-        .finally(() => setLoadingAtividades(false));
-    }
-  }, [atividadeId, derivedAtividadeId]);
-
-  // helper para quando usuário escolhe uma atividade manualmente
-  function escolherAtividade(id: number) {
-    setDerivedAtividadeId(id);
-    // opcional: recarregar instância agora que temos atividadeId
-    void fetchInstance();
-  }
-
   const total = useMemo(
     () => respostas.reduce((s, r) => s + (r.contador ?? 0), 0),
     [respostas]
@@ -286,86 +239,14 @@ export default function PluggedContagemMCQ({
   if (!payload && loading)
     return <div style={{ color: "#fff" }}>Carregando atividade...</div>;
 
-  // se não houver atividade definida ainda, renderiza caixa de seleção para escolher
+  // ✅ Se não houver atividade definida, não mostrar seleção (alunos sempre recebem atividadeId)
   if ((atividadeId ?? derivedAtividadeId) == null) {
     return (
       <div
         style={{ maxWidth: 680, margin: "0 auto", padding: 20, color: "#fff" }}
       >
-        <h3>Selecione a atividade</h3>
-        {loadingAtividades && <div>Carregando atividades...</div>}
-        {!loadingAtividades &&
-          availableAtividades &&
-          availableAtividades.length === 0 && (
-            <div>
-              Nenhuma atividade disponível. Peça ao professor para criar ou
-              associe a turma/atividade.
-            </div>
-          )}
-        {!loadingAtividades &&
-          availableAtividades &&
-          availableAtividades.length > 0 && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (!Number.isNaN(v)) escolherAtividade(v);
-                }}
-                defaultValue=""
-                style={{ padding: 8, borderRadius: 6 }}
-              >
-                <option value="" disabled>
-                  Escolha uma atividade...
-                </option>
-                {availableAtividades.map((a) => (
-                  <option key={a.idAtividade} value={a.idAtividade}>
-                    {a.titulo} (id:{a.idAtividade})
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  // se quiser recarregar lista manualmente
-                  setLoadingAtividades(true);
-                  void fetch("/api/atividades")
-                    .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-                    .then((j: unknown) => {
-                      if (Array.isArray(j)) {
-                        setAvailableAtividades(
-                          j as { idAtividade: number; titulo: string }[]
-                        );
-                      } else if (
-                        j &&
-                        typeof j === "object" &&
-                        Array.isArray((j as Record<string, unknown>).atividades)
-                      ) {
-                        setAvailableAtividades(
-                          (j as Record<string, unknown>).atividades as {
-                            idAtividade: number;
-                            titulo: string;
-                          }[]
-                        );
-                      } else {
-                        setAvailableAtividades([]);
-                      }
-                    })
-                    .catch((e: unknown) => {
-                      const msg = e instanceof Error ? e.message : String(e);
-                      console.warn("failed to load atividades list:", msg);
-                      setAvailableAtividades([]);
-                    })
-                    .finally(() => setLoadingAtividades(false));
-                }}
-                className="btn"
-                type="button"
-              >
-                Atualizar lista
-              </button>
-            </div>
-          )}
-        <div style={{ marginTop: 12, color: "#cfc6e6" }}>
-          Se você é professor: passe atividadeId e turmaId ao componente ao
-          renderizá-lo.
+        <div style={{ color: "#cfc6e6" }}>
+          Atividade não disponível. Entre em contato com seu professor.
         </div>
       </div>
     );
