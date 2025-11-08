@@ -85,6 +85,17 @@ export default async function handler(
         return turmaProfessorId === aplicadorId;
       });
 
+      // DEBUG: log discovery counts to help understand why students may see no activities
+      try {
+        console.debug(
+          `[listaratividades] alunoId=${alunoId} turmaIds=${JSON.stringify(
+            turmaIds
+          )} aplicacoes=${aplicacoes.length}`
+        );
+      } catch {
+        /* ignore logging errors */
+      }
+
       // map to atividade summary shape expected by the client
       const resultados = aplicacoes.map((ap: AplicacaoWithIncludes) => {
         const at = ap.atividade;
@@ -109,6 +120,13 @@ export default async function handler(
         };
       });
 
+      try {
+        console.debug(
+          `[listaratividades] alunoId=${alunoId} resultados=${resultados.length}`
+        );
+      } catch {
+        /* ignore */
+      }
       return res.status(200).json(resultados);
     }
 

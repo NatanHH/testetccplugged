@@ -157,6 +157,15 @@ export default async function handler(
       nome: t.turma?.nome ?? "",
     }));
 
+    // DEBUG: log counts before returning to help production debugging
+    try {
+      console.debug(
+        `[loginaluno] idAluno=${aluno.idAluno} turmas=${turmas.length} atividades=${atividades.length}`
+      );
+    } catch {
+      /* ignore logging errors */
+    }
+
     return res.status(200).json({
       success: true,
       idAluno: aluno.idAluno,
